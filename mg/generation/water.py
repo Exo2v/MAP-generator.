@@ -100,11 +100,22 @@ class WaterSystem:
         self.seed = int(seed)
 
     # ----------------------------------------------------------------------------------
-    def build(self, dem: np.ndarray, climate, progress=None) -> WaterResult:
+    def build(self, dem: np.ndarray, climate, progress=None,
+              no_water: Optional[np.ndarray] = None) -> WaterResult:
+        """Build the river/lake/ocean system.
+
+        ``no_water`` is an optional boolean mask of cells that must stay dry whatever the
+        heightfield says - the Ashenfall caldera basin is below sea level but is filled
+        with lava, so the surrounding sea must not pour into it.
+        """
         c = self.cfg
         region = self.region
         cs = float(region.cell_size)
         sea = float(c["sea_level"])
+        if no_water is not None:
+            no_water = np.asarray(no_water, dtype=bool)
+            if no_water.shape != dem.shape:
+                no_water = np.zeros(dem.shape, dtype=bool)
         dem = np.asarray(dem, dtype=np.float64).copy()
 
         def tick(f, label):
@@ -134,7 +145,10 @@ class WaterSystem:
         for lk in lakes:
             keep[lk.cells[:, 0], lk.cells[:, 1]] = True
         lake_mask = keep
-        ocean = ocean_mask(dem, sea)
+        if no_water is not None:
+            lake_mask = lake_mask & ~no_water
+        ocean = ocean_mask(dem, sea, exclude=no_water) if no_water is not None \
+            else ocean_mask(dem, sea)
 
         dinf = str(c.get("flow_model", "dinf")).lower() == "dinf"
         flow_fracs = None
@@ -365,6 +379,10 @@ class WaterSystem:
             "max_discharge": float(np.max(accum)) if accum.size else 0.0,
             "carved_volume": float(np.sum(np.maximum(dem - current, 0.0))),
         }
+        if no_water is not None:
+            # the lava basin: dry, and never counted as ocean in the diagnostics
+            water_mask[no_water] = 0
+            water_level[no_water] = np.nan
         tick(1.0, "hydrology complete")
         return WaterResult(
             dem=current,

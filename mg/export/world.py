@@ -26,6 +26,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from PIL import Image
+
+from ..core.erosion import slope_map
 from ..core.types import CHUNK, MIN_Y, SEA_LEVEL, TerrainGrid
 from ..generation.surface import TerrainSampler
 from .anvil import RegionFileWriter
@@ -179,6 +182,7 @@ def export_world(
     data_version = int(export_cfg.get("data_version", 3953))
     min_y = int(export_cfg.get("min_y", MIN_Y))
     max_y = int(export_cfg.get("max_y", 320))
+    sea_level = float((config or {}).get("climate", {}).get("sea_level", SEA_LEVEL))
     compression = int(export_cfg.get("compression", 2))
 
     region = terrain.region
@@ -200,7 +204,7 @@ def export_world(
         if key not in writers:
             writer = RegionFileWriter(
                 rx, rz, compression=compression, version=version, data_version=data_version,
-                min_y=min_y, max_y=max_y,
+                min_y=min_y, max_y=max_y, chunk_status=chunk_status,
             )
             path = _region_path(region_dir, writer)
             if key in flushed:  # a previous batch already wrote part of this region
@@ -208,13 +212,23 @@ def export_world(
             writers[key] = writer
         return writers[key]
 
+    # ---- who decorates the world? -------------------------------------------------------
+    # "engine" : bake vegetation/structures here and mark chunks full - playable vanilla.
+    # "mods"   : leave the surface bare, mark chunks as an earlier generation stage and
+    #            ship the populate mask, so the game's own decorators (Still Life,
+    #            Lithosphere) place the features on first load.  That is what the Ashenfall
+    #            specification asks for in its population section.
+    decorate_in_engine = str(export_cfg.get("decoration", "engine")).lower() != "mods"
+    chunk_status = str(export_cfg.get("chunk_status")
+                       or ("minecraft:full" if decorate_in_engine else "minecraft:features"))
+
     chunks_x = region.blocks_x // CHUNK
     chunks_z = region.blocks_z // CHUNK
     for cz in range(chunks_z):
         for cx in range(chunks_x):
             if should_cancel and should_cancel():
                 raise RuntimeError("export cancelled")
-            chunk = sampler.generate_chunk(cx, cz)
+            chunk = sampler.generate_chunk(cx, cz, decorate=decorate_in_engine)
             blocks_written += int(np.count_nonzero(chunk.blocks))
             writer = get_writer(cx, cz)
             world_cx = (region.x0 // CHUNK) + cx
@@ -278,6 +292,39 @@ def export_world(
             ))
         except Exception as exc:  # pragma: no cover
             print(f"warning: schematic export skipped ({exc})")
+
+    # ---- populate mask (spec population method 1) ---------------------------------------
+    # A binary mask marking where the game's decorators are allowed to plant things:
+    # everything that is not water, not a cliff, below the treeline and below the snow
+    # line.  WorldPainter consumes it as its native Populate layer, and it doubles as a
+    # human-readable record of where Still Life will place canopies.
+    if bool(export_cfg.get("write_populate_mask", False)) or not decorate_in_engine:
+        try:
+            from ..core.bluenoise import BlueNoiseMatrix
+
+            heights = np.asarray(terrain.heights, dtype=np.float64)
+            slope = np.degrees(np.arctan(slope_map(heights, float(region.cell_size))))
+            water = np.asarray(terrain.water_mask) > 0
+            canopy = (slope < 35.0) & ~water & (heights > float(sea_level) + 1.0)
+            canopy &= heights <= float(export_cfg.get("treeline", 225.0))
+            # dither so the mask edge is a natural scatter rather than a contour line
+            bn = BlueNoiseMatrix(int(export_cfg.get("populate_noise_size", 64)),
+                                 seed=int(seed))
+            mask = bn.mask8(canopy.astype(np.float64), offset=(region.z0, region.x0))
+            out = os.path.join(world_dir, "POPULATE_MASK.png")
+            Image.fromarray(mask).save(out)
+            extras.append(out)
+            scree = np.clip((slope - 25.0) / 20.0, 0.0, 1.0) * (~water)
+            out2 = os.path.join(world_dir, "SCREE_MASK.png")
+            Image.fromarray((scree * 255).astype(np.uint8)).save(out2)
+            extras.append(out2)
+            frost = np.clip((heights - float(export_cfg.get("snowline", 200.0)) ) / 40.0,
+                            0.0, 1.0) * (~water)
+            out3 = os.path.join(world_dir, "FROST_MASK.png")
+            Image.fromarray((frost * 255).astype(np.uint8)).save(out3)
+            extras.append(out3)
+        except Exception as exc:  # pragma: no cover
+            print(f"warning: populate mask skipped ({exc})")
 
     # ---- config + readme -------------------------------------------------------------------
     with open(os.path.join(world_dir, "mapgen.json"), "w", encoding="utf-8") as fh:

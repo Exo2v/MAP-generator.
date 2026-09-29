@@ -8,6 +8,7 @@ is being built.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -81,11 +82,40 @@ def run_pipeline(
     check()
 
     # ---- macro terrain -------------------------------------------------------------------
+    # Two engines: the generic World-Machine style chain, and the specification-driven
+    # Ashenfall builder that composes the continent of Vantyra from its tables.
     t0 = time.time()
-    generator = TerrainGenerator(cfg.to_dict(), region, seed)
-    heights, masks = generator.generate(X, Y, climate)
+    engine = str((cfg.terrain or {}).get("engine", "generic")).lower()
+    no_water = None
+    if engine == "ashenfall":
+        from .generation.ashenfall import AshenfallBuilder
+
+        ashen = AshenfallBuilder(cfg.to_dict(), region, seed).build(
+            X, Y, climate.temperature, climate.humidity,
+            progress=lambda f, l: report(0.12 + 0.16 * f, l),
+        )
+        heights = ashen.dem
+        climate = dataclasses.replace(climate, temperature=ashen.temperature,
+                                      humidity=ashen.humidity)
+        masks = {
+            "continentalness": ashen.cont.astype(np.float32),
+            "ashenfall_erosion": ashen.erosion.astype(np.float32),
+            "ashenfall_ridges": ashen.ridges.astype(np.float32),
+            "ashenfall_ids": ashen.ids,
+            "ashenfall_bare": ashen.bare.astype(np.float32),
+            "ashenfall_lava": ashen.lava.astype(np.uint8),
+        }
+        # the caldera basin is a lava basin: water must not flood it
+        no_water = ashen.dry
+        masks["ashenfall_basin"] = ashen.dry.astype(np.uint8)
+        extra_terrain = {"ashenfall": ashen.diagnostics}
+    else:
+        generator = TerrainGenerator(cfg.to_dict(), region, seed)
+        heights, masks = generator.generate(X, Y, climate)
+        extra_terrain = {}
     timer.record("terrain", time.time() - t0,
-                 {"min": float(heights.min()), "max": float(heights.max())})
+                 {"min": float(heights.min()), "max": float(heights.max()),
+                  "engine": engine, **extra_terrain})
     report(0.28, "terrain")
     check()
 
@@ -127,7 +157,8 @@ def run_pipeline(
     # ---- water: rivers, lakes, flow --------------------------------------------------------
     t0 = time.time()
     water = WaterSystem(cfg.to_dict(), region, seed).build(
-        heights, climate, progress=lambda f, l: report(0.5 + 0.2 * f, l)
+        heights, climate, progress=lambda f, l: report(0.5 + 0.2 * f, l),
+        no_water=no_water,
     )
     heights = water.dem
     timer.record("water", time.time() - t0, water.diagnostics)
@@ -156,6 +187,13 @@ def run_pipeline(
         volcano_mask=masks.get("volcano"),
         cell_size=float(region.cell_size),
     )
+    if engine == "ashenfall":
+        # spec §2: the landmark table names the biome of every region outright
+        from .generation.ashenfall import landmark_biome_field
+
+        masks["ashenfall_biome"] = landmark_biome_field(
+            masks["ashenfall_ids"], heights, water.water_mask
+        )
     timer.record("biomes", time.time() - t0)
     report(0.78, "biomes")
     check()
@@ -209,7 +247,8 @@ def run_pipeline(
             "snowline": biome_fields.snowline,
             "seed": seed,
             "masks": {k: v for k, v in masks.items()
-                      if k in ("continentalness", "mountain_belt", "islands", "volcano")},
+                      if k in ("continentalness", "mountain_belt", "islands", "volcano")
+                      or k.startswith("ashenfall_")},
             "sea_level": float(cfg.climate.get("sea_level", 63.0)),
             "waterfalls": water.waterfalls[:5000],
             "stage_times": timer.stages,

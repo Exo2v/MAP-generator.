@@ -167,8 +167,19 @@ class TerrainSampler:
         return i0c, j0c, (u - i0), (v - j0)
 
     def sample_field(self, field: np.ndarray, wx: np.ndarray, wz: np.ndarray,
-                     outside=np.nan) -> np.ndarray:
-        """Bilinear sample of a cell field at block coordinates."""
+                     outside=np.nan, *, nearest: bool = False) -> np.ndarray:
+        """Sample a cell field at block coordinates.
+
+        Bilinear by default; ``nearest=True`` for categorical rasters (landmark ids,
+        biome overrides) where interpolating between two labels is meaningless.
+        """
+        if nearest:
+            h, w = field.shape
+            i = np.clip(np.rint((wx - self.region.x0) / self.cs - 0.5).astype(np.int64),
+                        0, w - 1)
+            j = np.clip(np.rint((wz - self.region.z0) / self.cs - 0.5).astype(np.int64),
+                        0, h - 1)
+            return np.asarray(field)[j, i]
         h, w = field.shape
         u = (wx - self.region.x0) / self.cs - 0.5
         v = (wz - self.region.z0) / self.cs - 0.5
@@ -219,9 +230,39 @@ class TerrainSampler:
         return (d1 + d2) * mult * (1.0 + slope)
 
     # ----------------------------------------------------------------------------------
+    # Ashenfall: the specification's own surface rule (spec §6)
+    # ----------------------------------------------------------------------------------
+    def _ashenfall_masks(self) -> Optional[Dict[str, np.ndarray]]:
+        masks = (self.t.meta or {}).get("masks") or {}
+        if "ashenfall_ids" not in masks:
+            return None
+        return masks
+
+    def _ashenfall_sample(self, WX, WZ) -> Optional[Dict[str, np.ndarray]]:
+        masks = self._ashenfall_masks()
+        if masks is None:
+            return None
+        out = {
+            "ids": self.sample_field(masks["ashenfall_ids"], WX, WZ, outside=-1,
+                                     nearest=True).astype(np.int16),
+            "bare": np.clip(self.sample_field(masks["ashenfall_bare"], WX, WZ,
+                                              outside=0.0), 0.0, 1.0),
+        }
+        if "ashenfall_lava" in masks:
+            out["lava"] = self.sample_field(masks["ashenfall_lava"], WX, WZ,
+                                            outside=0.0, nearest=True) > 0.5
+        if "ashenfall_biome" in masks:
+            out["biome"] = self.sample_field(masks["ashenfall_biome"], WX, WZ,
+                                             outside=-1, nearest=True).astype(np.int16)
+        if "ashenfall_basin" in masks:
+            out["dry"] = self.sample_field(masks["ashenfall_basin"], WX, WZ,
+                                           outside=0.0, nearest=True) > 0.5
+        return out
+
+    # ----------------------------------------------------------------------------------
     # chunk generation
     # ----------------------------------------------------------------------------------
-    def generate_chunk(self, cx: int, cz: int) -> ChunkBlocks:
+    def generate_chunk(self, cx: int, cz: int, *, decorate: bool = True) -> ChunkBlocks:
         t = self.t
         region = self.region
         c = self.cfg
@@ -244,6 +285,13 @@ class TerrainSampler:
         # block from the interpolated temperature/humidity, which removes the
         # cell-quantised staircase along every forest edge.
         bi = self._biome_at_block(WX, WZ, temp, hum, h_macro, bi_cell=None)
+
+        # The specification assigns each landmark its own biomes; those cells carry an
+        # explicit label that outranks the climate classifier.
+        af = self._ashenfall_sample(WX, WZ)
+        if af is not None and "biome" in af:
+            over = af["biome"] >= 0
+            bi = np.where(over, af["biome"], bi)
 
         slope = np.abs(np.gradient(h_macro, axis=1)) + np.abs(np.gradient(h_macro, axis=0))
 
@@ -292,6 +340,13 @@ class TerrainSampler:
         blocks = np.where(soil_mask, filler_ids[None, :, :], blocks)
         blocks = np.where(surface_mask, top_ids[None, :, :], blocks)
 
+        # lava basins: the caldera floor is molten, so a sheet of lava sits on it (the
+        # water system was told to keep out of these cells)
+        if af is not None and af.get("lava") is not None and np.any(af["lava"]):
+            lava_y = (ground + 1)[None, :, :]
+            blocks = np.where((ygrid == lava_y) & af["lava"][None, :, :],
+                              BLOCK_ID["lava"], blocks)
+
         # snow layer on top of the finished surface
         snow_layer = np.where(snow_ids > 0, 1, 0).astype(np.int16)
         snow_y = (ground + 1)[None, :, :]
@@ -311,6 +366,9 @@ class TerrainSampler:
         # ---- water ----------------------------------------------------------------------
         wy = np.where(wl > -1e8, np.rint(wl), -1).astype(np.int16)
         water_top = np.where(wm > 0, wy, np.where(h_float < SEA_LEVEL, int(SEA_LEVEL), -1))
+        if af is not None and "dry" in af:
+            # the caldera basin sits below sea level but is molten, not flooded
+            water_top = np.where(af["dry"], -1, water_top)
         water_top = np.rint(water_top).astype(np.int16)
         is_water = (water_top > -1) & (ygrid <= water_top[None, :, :]) & (ygrid > gy)
         blocks = np.where(is_water, BLOCK_ID["water"], blocks)
@@ -330,7 +388,8 @@ class TerrainSampler:
         blocks = self._apply_ores(blocks, cx, cz, x0, z0, ground)
 
         # ---- vegetation + structures ------------------------------------------------------
-        if float(c["vegetation_in_export"]) > 0 or float(c["structures_in_export"]) > 0:
+        if decorate and (float(c["vegetation_in_export"]) > 0
+                         or float(c["structures_in_export"]) > 0):
             blocks = self._decorate(blocks, cx, cz, x0, z0, ground, bi, wm, water_top, veg)
 
         return ChunkBlocks(
@@ -432,12 +491,107 @@ class TerrainSampler:
         high_cold = (snow_flat > 0) & (ground_flat > snow_line_flat)
         top[high_cold] = BLOCK_ID["snow_block"]
 
+        self._apply_ashenfall_surface(
+            top, filler, snow, biome, ground, slope, WX, WZ, water_mask
+        )
+
         return (
             top.reshape(np.shape(biome)).astype(np.uint16),
             filler.reshape(np.shape(biome)).astype(np.uint16),
             snow.reshape(np.shape(biome)),
             veg_code.reshape(np.shape(biome)),
         )
+
+    def _apply_ashenfall_surface(self, top, filler, snow, biome, ground, slope,
+                                 WX, WZ, water_mask) -> None:
+        """Spec §6: the Still Life slope-aware surface rule, applied in place.
+
+        ============  =========================================================
+        slope         surface
+        ============  =========================================================
+        0 - 25 deg    grass block / deep loam (populated)
+        25 - 35 deg   coarse dirt, podzol (40 % density)
+        35 - 45 deg   cobblestone, stone scree, gravel (5 % density)
+        > 45 deg      granite / basalt bedrock (0 %)
+        Y > 225       snow block, packed ice, calcite (treeline)
+        caldera       blackstone, basalt, magma block (barren override)
+        ============  =========================================================
+        """
+        af = self._ashenfall_sample(WX, WZ)
+        if af is None:
+            return
+        top_f = top.ravel()
+        filler_f = filler.ravel()
+        snow_f = snow.ravel()
+        deg = np.degrees(np.arctan(np.asarray(slope, dtype=np.float64))).ravel()
+        ground_f = np.asarray(ground).ravel()
+        wet = np.asarray(water_mask).ravel() > 0
+        gravel = BLOCK_ID["gravel"]
+        stone = BLOCK_ID["stone"]
+
+        band1 = (deg >= 25.0) & (deg < 35.0) & ~wet
+        band2 = (deg >= 35.0) & (deg <= 45.0) & ~wet
+        band3 = (deg > 45.0) & ~wet
+        top_f[band1] = BLOCK_ID["coarse_dirt"]
+        filler_f[band1] = BLOCK_ID["coarse_dirt"]
+        top_f[band2] = np.where(deg[band2] > 0.55 * 45.0 + 13.0,
+                                BLOCK_ID["cobblestone"], BLOCK_ID["stone"])
+        filler_f[band2] = stone
+        scree = np.clip((deg - 35.0) / 12.0, 0.0, 1.0)
+        # sheer cliffs are bedrock/granite: no topsoil survives 45 degrees
+        top_f[band3] = np.where(np.asarray(biome).ravel()[band3] == BIOME_INDEX["basalt_deltas"],
+                                BLOCK_ID["basalt"], BLOCK_ID["granite"])
+        filler_f[band3] = np.where(deg[band3] > 60.0, BLOCK_ID["bedrock"], stone)
+
+        # treeline (spec §6: Y > 225)
+        treeline = ground_f > 225.0
+        if np.any(treeline):
+            top_f[treeline] = np.where(
+                np.asarray(biome).ravel()[treeline] == BIOME_INDEX["frozen_peaks"],
+                BLOCK_ID["snow_block"], BLOCK_ID["calcite"])
+            filler_f[treeline] = BLOCK_ID["packed_ice"]
+            snow_f[treeline] = np.maximum(snow_f[treeline], 1)
+
+        lava = af.get("lava")
+        ids = af["ids"].ravel()
+        if lava is not None and np.any(lava):
+            lv = lava.ravel()
+            top_f[lv] = BLOCK_ID["magma_block"]
+            filler_f[lv] = BLOCK_ID["magma_block"]
+
+        # the caldera rim and crater: volcanic barrenness overrides every other rule
+        from .landmarks import ELEVATIONS, LANDMARKS
+
+        cal_idx = next((i for i, lm in enumerate(LANDMARKS) if lm.kind == "caldera"), -1)
+        if cal_idx >= 0:
+            cal = ids == cal_idx
+            rim = cal & (ground_f > ELEVATIONS["caldera_floor"] + 22.0)
+            top_f[rim] = np.where(deg[rim] > 30.0, BLOCK_ID["blackstone"],
+                                  BLOCK_ID["basalt"])
+            filler_f[rim] = BLOCK_ID["blackstone"]
+            # the Obsidian Throne itself, and the glassy shoulders below the rim
+            throne = cal & (ground_f > ELEVATIONS["caldera_throne"] - 6.0) \
+                & (ground_f < ELEVATIONS["caldera_throne"] + 30.0)
+            top_f[throne] = BLOCK_ID["obsidian"]
+            filler_f[throne] = BLOCK_ID["obsidian"]
+        # volcanic glass on the dune crests (spec: vitrified black-glass dunes)
+        dunes_idx = next((i for i, lm in enumerate(LANDMARKS) if lm.kind == "dunes"), -1)
+        if dunes_idx >= 0:
+            crest = (ids == dunes_idx) & (ground_f > 89.0)
+            top_f[crest] = BLOCK_ID["black_glazed_terracotta"]
+        # the Veil of Salt: white crust over abyssal gravel
+        veil = ids >= len(LANDMARKS)
+        if np.any(veil):
+            crust = veil & ~wet
+            top_f[crust] = np.where(
+                hash2(np.floor(np.asarray(WX)).astype(np.int64).ravel()[crust],
+                      np.floor(np.asarray(WZ)).astype(np.int64).ravel()[crust],
+                      self.seed + 7300) > 0.55,
+                BLOCK_ID["calcite"], BLOCK_ID["gravel"])
+            filler_f[crust] = BLOCK_ID["gravel"]
+        top[:] = top_f.reshape(top.shape)
+        filler[:] = filler_f.reshape(filler.shape)
+        snow[:] = snow_f.reshape(snow.shape)
 
     # ----------------------------------------------------------------------------------
     def _cave_mask(self, WX, WZ, ygrid, depth, ground):

@@ -229,10 +229,39 @@ BIOMES: List[str] = [
     "fertile_valley",
 ]
 
+#: Vanilla biomes the Ashenfall specification names directly for its regions.  They are
+#: appended so every existing index stays put, and ``BIOME_TO_VANILLA`` in the exporter
+#: resolves them to themselves.
+ASHENFALL_BIOMES: List[str] = [
+    "wooded_badlands",
+    "eroded_badlands",
+    "badlands",
+    "basalt_deltas",
+    "frozen_peaks",
+    "jagged_peaks",
+    "cherry_grove",
+    "warm_ocean",
+    "lukewarm_ocean",
+    "deep_cold_ocean",
+]
+for _name in ASHENFALL_BIOMES:
+    if _name not in BIOMES:
+        BIOMES.append(_name)
+
 BIOME_INDEX: Dict[str, int] = {name: i for i, name in enumerate(BIOMES)}
 
 # Display colours used by the preview + biome raster export.
 BIOME_COLORS: Dict[str, Tuple[int, int, int]] = {
+    "wooded_badlands": (140, 88, 58),
+    "eroded_badlands": (168, 96, 56),
+    "badlands": (186, 108, 62),
+    "basalt_deltas": (44, 42, 46),
+    "frozen_peaks": (226, 236, 244),
+    "jagged_peaks": (198, 210, 220),
+    "cherry_grove": (232, 174, 196),
+    "warm_ocean": (54, 140, 158),
+    "lukewarm_ocean": (62, 152, 166),
+    "deep_cold_ocean": (12, 40, 74),
     "deep_ocean": (12, 40, 82),
     "ocean": (24, 68, 128),
     "shallow_coast": (56, 122, 168),

@@ -261,6 +261,24 @@ PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# --------------------------------------------------------------------------------------
+# Spec-driven presets
+# --------------------------------------------------------------------------------------
+#
+# Ashenfall is not a set of dials - it is a specification, so its preset lives next to
+# the engine that consumes it (``mg/generation/ashenfall.py``) rather than being
+# hand-copied into the table above.  Registering it here keeps ``--preset ashenfall``,
+# the desktop preset list and ``preset_list()`` working unchanged.
+try:  # pragma: no cover - import guard keeps config importable on its own
+    from .generation.ashenfall import ASHENFALL_PRESET
+
+    PRESETS["ashenfall"] = ASHENFALL_PRESET
+except Exception as _exc:  # pragma: no cover
+    import warnings
+
+    warnings.warn(f"ashenfall preset unavailable: {_exc}")
+
+
 def apply_preset(cfg: GenerationConfig, preset: str) -> GenerationConfig:
     data = PRESETS.get(preset)
     if not data:
@@ -268,6 +286,15 @@ def apply_preset(cfg: GenerationConfig, preset: str) -> GenerationConfig:
     cfg.preset = preset
     for key, value in data.items():
         if key in ("label", "description"):
+            continue
+        if key == "region" and isinstance(value, dict):
+            # a specified canvas (Ashenfall is exactly 8,000 x 8,000 at its own origin)
+            for field_name, field_value in value.items():
+                if hasattr(cfg.region, field_name):
+                    setattr(cfg.region, field_name, int(field_value))
+            continue
+        if key in ("name", "seed"):
+            setattr(cfg, key, type(getattr(cfg, key))(value))
             continue
         section = getattr(cfg, key, None)
         if isinstance(section, dict):

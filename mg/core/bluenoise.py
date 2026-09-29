@@ -117,23 +117,38 @@ class BlueNoiseMatrix:
         self.matrix = void_and_cluster(self.size, seed=self.seed, cache=self._cache)
 
     def tiled(self, shape: Tuple[int, int], *, offset: Tuple[int, int] = (0, 0)) -> np.ndarray:
-        """A ``shape``-sized threshold field, seam-jittered per tile."""
-        h, w = shape
+        """A ``shape``-sized threshold field, seam-jittered per tile.
+
+        ``offset`` is the world cell coordinate of the top-left sample, so a mask can be
+        generated for a sub-region (or a world centred on the origin, where coordinates
+        are negative) and still line up with the masks generated for its neighbours.  The
+        per-tile roll is hashed from the *absolute* tile index, so it is stable regardless
+        of where the window starts.
+        """
+        h, w = int(shape[0]), int(shape[1])
         s = self.size
         oy, ox = int(offset[0]), int(offset[1])
-        tiles_y = h // s + 1
-        tiles_x = w // s + 1
-        out = np.empty((tiles_y * s, tiles_x * s), dtype=np.float32)
-        for ty in range(tiles_y):
-            for tx in range(tiles_x):
-                # deterministic per-tile roll - no RNG state, reproducible forever
+        out = np.empty((h, w), dtype=np.float32)
+        ty0, tx0 = oy // s, ox // s
+        ty1 = (oy + h - 1) // s
+        tx1 = (ox + w - 1) // s
+        for ty in range(ty0, ty1 + 1):
+            for tx in range(tx0, tx1 + 1):
                 hsh = (ty * 73856093) ^ (tx * 19349663) ^ (self.seed * 83492791)
                 ry = (hsh >> 8) % s
                 rx = (hsh >> 16) % s
-                out[ty * s:(ty + 1) * s, tx * s:(tx + 1) * s] = np.roll(
-                    np.roll(self.matrix, ry, axis=0), rx, axis=1
-                )
-        return out[oy:oy + h, ox:ox + w]
+                tile = np.roll(np.roll(self.matrix, ry, axis=0), rx, axis=1)
+                # overlap of this tile with the requested window
+                y0 = ty * s - oy
+                x0 = tx * s - ox
+                sy0, sx0 = max(0, -y0), max(0, -x0)
+                dy0, dx0 = max(0, y0), max(0, x0)
+                dy1 = min(h, y0 + s)
+                dx1 = min(w, x0 + s)
+                if dy0 >= dy1 or dx0 >= dx1:
+                    continue
+                out[dy0:dy1, dx0:dx1] = tile[sy0:sy0 + (dy1 - dy0), sx0:sx0 + (dx1 - dx0)]
+        return out
 
     def threshold(self, probability: np.ndarray, *, offset: Tuple[int, int] = (0, 0),
                   ) -> np.ndarray:

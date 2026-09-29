@@ -255,11 +255,18 @@ def fill_lakes(dem: np.ndarray, filled: np.ndarray, fill_depth: np.ndarray, *,
     return lake_mask, lakes
 
 
-def ocean_mask(dem: np.ndarray, sea_level: float) -> np.ndarray:
-    """Cells below sea level connected to the border (i.e. the actual sea)."""
+def ocean_mask(dem: np.ndarray, sea_level: float,
+               exclude: Optional[np.ndarray] = None) -> np.ndarray:
+    """Cells below sea level connected to the border (i.e. the actual sea).
+
+    ``exclude`` marks cells that are below sea level but are not sea - a lava-filled
+    crater basin, for instance.
+    """
     from scipy import ndimage
 
     below = dem < sea_level
+    if exclude is not None:
+        below = below & ~np.asarray(exclude, dtype=bool)
     labels, count = ndimage.label(below, structure=np.ones((3, 3), dtype=int))
     if count == 0:
         return np.zeros_like(below)

@@ -220,8 +220,19 @@ def build_chunk_nbt(
     version: str = "1.21",
     min_y: int = MIN_Y,
     max_y: int = MAX_Y,
+    status: str = "minecraft:full",
+    heightmaps: bool = True,
 ) -> Tag:
-    """Build the chunk root compound tag from a ``ChunkBlocks`` block array."""
+    """Build the chunk root compound tag from a ``ChunkBlocks`` block array.
+
+    ``status`` is the chunk generation stage recorded in the save.  Writing
+    ``minecraft:full`` means "this chunk is finished, place no features"; writing an
+    earlier stage (``minecraft:features``) leaves decoration to the game, which is how a
+    modpack's own placed features - Still Life canopies, fallen logs, boulders - get
+    applied on load.  That is the mechanism the Ashenfall specification relies on in its
+    population section.
+    """
+    status = status if status.startswith("minecraft:") else f"minecraft:{status}"
     n_sections = (max_y - min_y) // 16
     sections: List[Tag] = []
     block_flat = blocks.reshape(n_sections, 16, 256)  # (sections, y, xz)
@@ -296,16 +307,18 @@ def build_chunk_nbt(
         Int("DataVersion", int(data_version)),
         Int("xPos", int(cx)),
         Int("zPos", int(cz)),
-        String("Status", "minecraft:full"),
+        String("Status", status),
         Long("LastUpdate", 0),
         Long("InhabitedTime", 0),
         List("sections", sections),
         List("block_entities", []),
-        compound_of("Heightmaps", [LongArray(k, v) for k, v in hm.items()]),
+        compound_of("Heightmaps", [LongArray(k, v) for k, v in hm.items()] if heightmaps else []),
         List("PostProcessing", []),
         Compound("structures"),
         List("entities", []),
         Byte("isLightOn", 0),
+        List("block_ticks", []),
+        List("fluid_ticks", []),
     ])
     return root
 
@@ -336,7 +349,8 @@ class RegionFileWriter:
     """Accumulates chunks and writes a single ``r.X.Z.mca`` region file."""
 
     def __init__(self, rx: int, rz: int, *, compression: int = 2, version: str = "1.21",
-                 data_version: int = 3953, min_y: int = MIN_Y, max_y: int = MAX_Y):
+                 data_version: int = 3953, min_y: int = MIN_Y, max_y: int = MAX_Y,
+                 chunk_status: str = "minecraft:full"):
         self.rx = rx
         self.rz = rz
         self.compression = compression
@@ -344,6 +358,10 @@ class RegionFileWriter:
         self.data_version = data_version
         self.min_y = min_y
         self.max_y = max_y
+        # "minecraft:full" = finished chunk, no further decoration; an earlier stage
+        # (e.g. "minecraft:features") leaves decoration to the game, so a modpack's own
+        # placed features run when the chunk loads.
+        self.chunk_status = chunk_status
         self.chunks: Dict[int, bytes] = {}
         self.sizes: Dict[int, int] = {}
 
@@ -391,6 +409,7 @@ class RegionFileWriter:
             version=self.version,
             min_y=self.min_y,
             max_y=self.max_y,
+            status=self.chunk_status,
         )
         import io
 

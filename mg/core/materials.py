@@ -37,7 +37,10 @@ BLOCKS: List[str] = [
     "terracotta", "white_terracotta", "orange_terracotta", "yellow_terracotta",
     "brown_terracotta", "red_terracotta", "light_gray_terracotta", "muddy_mangrove_roots",
     "snow_block", "snow", "powder_snow", "ice", "packed_ice", "blue_ice",
-    "basalt", "blackstone", "obsidian", "magma_block", "dripstone_block",
+    "basalt", "smooth_basalt", "blackstone", "obsidian", "magma_block", "dripstone_block",
+    "crimson_nylium", "warped_nylium", "twisting_vines", "weeping_vines", "soul_sand",
+    "amethyst_block", "flowering_azalea_leaves", "glow_lichen", "bone_block",
+    "black_terracotta", "black_glazed_terracotta", "honeycomb_block",
     # liquids / gases
     "water", "lava",
     # ores
@@ -47,9 +50,15 @@ BLOCKS: List[str] = [
     "deepslate_lapis_ore", "deepslate_diamond_ore",
     # wood
     "oak_log", "birch_log", "spruce_log", "jungle_log", "acacia_log", "dark_oak_log",
-    "mangrove_log",
+    "mangrove_log", "cherry_log",
     "oak_leaves", "birch_leaves", "spruce_leaves", "jungle_leaves", "acacia_leaves",
-    "dark_oak_leaves", "mangrove_leaves",
+    "dark_oak_leaves", "mangrove_leaves", "cherry_leaves",
+    # fungal wood (the Whispering Fen's "giant fungal heartwood")
+    "crimson_stem", "warped_stem", "crimson_hyphae", "warped_hyphae",
+    "nether_wart_block", "warped_wart_block", "shroomlight",
+    # reef / drowned-shelf dressing for the Sunken Reach
+    "tube_coral_block", "brain_coral_block", "bubble_coral_block", "fire_coral_block",
+    "horn_coral_block", "prismarine", "prismarine_bricks", "sea_lantern",
     "oak_planks", "spruce_planks", "dark_oak_planks", "cobblestone", "mossy_cobblestone",
     "stone_bricks", "mossy_stone_bricks", "deepslate_bricks", "bricks", "glass",
     "glass_pane", "oak_fence", "oak_door", "oak_stairs", "oak_slab", "torch", "lantern",
@@ -61,7 +70,7 @@ BLOCKS: List[str] = [
     "cactus", "bamboo", "sugar_cane", "seagrass", "kelp", "lily_pad", "sweet_berry_bush",
     "red_mushroom", "brown_mushroom", "sunflower", "lilac", "rose_bush", "peony",
     "vine", "glow_lichen", "spore_blossom", "moss_carpet", "brown_mushroom_block",
-    "red_mushroom_block", "mushroom_stem",
+    "red_mushroom_block", "mushroom_stem", "pink_petals", "cherry_sapling",
 ]
 
 BLOCK_ID: Dict[str, int] = {name: i for i, name in enumerate(BLOCKS)}
@@ -257,6 +266,41 @@ PROFILES: Dict[str, SurfaceProfile] = {
                                                         "brown_mushroom")),
     "sparse_jungle": SurfaceProfile(top="grass_block", filler="coarse_dirt",
                                     ground_cover=("grass", "tall_grass", "fern")),
+    # ---- Ashenfall regions (spec §2 landmark table + §6 surface rule) -----------------
+    "wooded_badlands": SurfaceProfile(top="orange_terracotta", filler="terracotta",
+                                      filler_depth=(3, 6), subsoil="yellow_terracotta",
+                                      subsoil_depth=(2, 5), rocky_noise=0.35,
+                                      ground_cover=("dead_bush", "grass")),
+    "eroded_badlands": SurfaceProfile(top="terracotta", filler="red_sand",
+                                      filler_depth=(2, 5), subsoil="white_terracotta",
+                                      subsoil_depth=(2, 4), rocky_noise=0.45,
+                                      ground_cover=("dead_bush",)),
+    "badlands": SurfaceProfile(top="orange_terracotta", filler="terracotta",
+                               filler_depth=(3, 6), rocky_noise=0.3,
+                               ground_cover=("dead_bush",)),
+    # spec §2: basalt / blackstone / magma_block / obsidian
+    "basalt_deltas": SurfaceProfile(top="basalt", filler="blackstone", filler_depth=(3, 8),
+                                    stone="basalt", deep_stone="deepslate",
+                                    rocky_noise=0.55, ground_cover=("dead_bush",)),
+    # spec §2: snow_block / packed_ice / calcite / stone
+    "frozen_peaks": SurfaceProfile(top="snow_block", filler="packed_ice",
+                                   filler_depth=(2, 4), subsoil="calcite",
+                                   surface_snow=1, rocky_noise=0.4),
+    "jagged_peaks": SurfaceProfile(top="stone", filler="gravel", filler_depth=(1, 3),
+                                   subsoil="calcite", surface_snow=1, rocky_noise=0.7),
+    # spec §2: cherry terraces / stone / gilded ruins
+    "cherry_grove": SurfaceProfile(top="grass_block", filler="dirt",
+                                   ground_cover=("grass", "pink_petals", "allium")),
+    # spec §2: sand / coral reefs / prismarine gravel
+    "warm_ocean": SurfaceProfile(top="sand", filler="sand", filler_depth=(2, 5),
+                                 subsoil="prismarine", subsoil_depth=(2, 4),
+                                 rocky_noise=0.0),
+    "lukewarm_ocean": SurfaceProfile(top="sand", filler="sand", filler_depth=(2, 5),
+                                     subsoil="prismarine", subsoil_depth=(1, 3)),
+    # spec §2: gravel / deepslate / packed salt crust
+    "deep_cold_ocean": SurfaceProfile(top="gravel", filler="gravel", filler_depth=(2, 5),
+                                      subsoil="deepslate", subsoil_depth=(3, 8),
+                                      rocky_noise=0.3),
 }
 
 # climates that override the biome default (cold desert -> gravel, etc.)
