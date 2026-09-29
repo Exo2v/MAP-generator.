@@ -34,6 +34,13 @@ import numpy as np
 
 from ..core.hydrology import (
     build_river_network,
+    carve_footprint,
+    carve_tiered_channels,
+    classify_tiers,
+    dinf_accumulation,
+    dinf_flow,
+    match_accumulation_scale,
+    dinf_flow_vectors,
     carve_channels,
     warp_field,
     channel_geometry,
@@ -61,6 +68,10 @@ DEFAULT_WATER = {
     "max_lakes": 240,
     "waterfall_min_drop": 3.5,
     "coast_mouth_dig": 1.0,
+    "river_logic": 1.0,            # graded beds, meander migration, deltas (own design)
+    "flow_model": "dinf",          # "dinf" (spec 2.3) or "d8" (classic)
+    "tier_carve": True,            # per-tier V / U / alluvial cross-sections
+    "alluvial_spread": 3.0,        # how far lowland floodplains bleed outward
     "enforce_downhill": 1.0,
     "floodplain_width": 0.35,
     "meander_strength": 1.0,
@@ -78,6 +89,7 @@ class WaterResult:
     rivers: List[RiverPath]
     lakes: List[Lake]
     waterfalls: List[Tuple[float, float, float]] = field(default_factory=list)
+    tiers: Optional[np.ndarray] = None      # 0 dry, 1 torrent, 2 mid-tier, 3 lowland
     diagnostics: Dict[str, float] = field(default_factory=dict)
 
 
@@ -124,8 +136,26 @@ class WaterSystem:
         lake_mask = keep
         ocean = ocean_mask(dem, sea)
 
+        dinf = str(c.get("flow_model", "dinf")).lower() == "dinf"
+        flow_fracs = None
         dirs = flow_directions(filled)
-        accum = flow_accumulation(filled, dirs)
+        accum_scale = 1.0
+        if dinf:
+            flow_fracs, dinf_vec = dinf_flow(filled)
+            accum = dinf_accumulation(filled, flow_fracs)
+            # D-infinity spreads each cell's water between two neighbours, so absolute
+            # drainage areas sit on a different scale than the D8 numbers every
+            # threshold was written against.  Measure the ratio once and rescale the
+            # river / tier thresholds, or the whole network would vanish.
+            accum_scale = match_accumulation_scale(
+                flow_accumulation(filled, dirs), accum,
+                mask=flow_accumulation(filled, dirs) > 4.0,
+            )
+            accum = accum * accum_scale
+            c["_accum_scale"] = accum_scale
+        else:
+            dinf_vec = None
+            accum = flow_accumulation(filled, dirs)
         tick(0.2, "watershed routing")
 
         # ---- 2. climate-aware channel threshold --------------------------------------
@@ -137,22 +167,43 @@ class WaterSystem:
         # ---- 3+4. carve, re-route, repeat --------------------------------------------
         current = dem.copy()
         for i in range(int(c["carve_passes"])):
-            current = carve_channels(
-                current, dirs, accum,
-                cell_size=cs,
-                min_discharge=threshold_map,
-                strength=float(c["valley_depth"]),
-                bank_flare=float(c["bank_flare"]),
-                lake_mask=lake_mask,
-                sea_level=sea,
-                passes=1,
-                meander_strength=float(c["meander_strength"]),
-                seed=self.seed + i * 17,
-            )
+            if bool(c.get("tier_carve", True)):
+                # spec 2.3 A.4: torrents carve V-shaped ravines, mid-tier rivers U-shaped
+                # gravel beds, lowland rivers wide alluvial floors with levees
+                warped = warp_field(accum, cell_size=cs, seed=self.seed + i * 17,
+                                    strength=float(c["meander_strength"]), scale=14.0)
+                current, tier_ids = carve_tiered_channels(
+                    current, warped,
+                    cell_size=cs,
+                    threshold=float(np.median(np.asarray(threshold_map))),
+                    bank_flare=float(c["bank_flare"]),
+                    sea_level=sea,
+                    valley_depth_scale=float(c["valley_depth"]),
+                    passes=1,
+                    lake_mask=lake_mask,
+                    alluvial_spread=float(c.get("alluvial_spread", 3.0)),
+                )
+            else:
+                current = carve_channels(
+                    current, dirs, accum,
+                    cell_size=cs,
+                    min_discharge=threshold_map,
+                    strength=float(c["valley_depth"]),
+                    bank_flare=float(c["bank_flare"]),
+                    lake_mask=lake_mask,
+                    sea_level=sea,
+                    passes=1,
+                    meander_strength=float(c["meander_strength"]),
+                    seed=self.seed + i * 17,
+                )
             if i < int(c["carve_passes"]) - 1:
                 filled, _ = priority_flood(current, epsilon=2e-4)
                 dirs = flow_directions(filled)
-                accum = flow_accumulation(filled, dirs)
+                if dinf:
+                    flow_fracs, dinf_vec = dinf_flow(filled)
+                    accum = dinf_accumulation(filled, flow_fracs) * accum_scale
+                else:
+                    accum = flow_accumulation(filled, dirs)
             tick(0.35 + 0.2 * (i + 1), f"carving channels ({i + 1})")
 
         if float(c["floodplain_width"]) > 0:
@@ -162,7 +213,11 @@ class WaterSystem:
         # final routing on the carved surface
         filled, fill_depth = priority_flood(current, epsilon=2e-4)
         dirs = flow_directions(filled)
-        accum = flow_accumulation(filled, dirs)
+        if dinf:
+            flow_fracs, dinf_vec = dinf_flow(filled)
+            accum = dinf_accumulation(filled, flow_fracs) * accum_scale
+        else:
+            accum = flow_accumulation(filled, dirs)
 
         # ---- 5. streams ---------------------------------------------------------------
         # Land channels only: the sea floor is not a river, and excluding it stops the
@@ -177,6 +232,48 @@ class WaterSystem:
         )
         tick(0.72, "extracting river networks")
 
+        # ---- 5b. river shaping: graded beds, meander migration, deltas -----------------
+        # This is the river logic proper.  Flow routing decided *where* the water goes;
+        # the shaper decides what the channel looks like once it gets there, then hands
+        # back a rasterised footprint so the carve, the water mask and the drawn ribbons
+        # all describe the same channel.
+        shaped_mask = None
+        if float(c.get("river_logic", 1.0)) > 0 and rivers:
+            from .rivers import RiverShaper, rasterize_channels
+
+            shaper = RiverShaper(c, seed=self.seed + 91)
+            shaped = shaper.shape(
+                current, rivers,
+                cell_size=cs,
+                threshold=float(np.median(np.asarray(threshold_map))),
+                ocean=ocean,
+                lake_mask=lake_mask,
+                sea_level=sea,
+                origin=(region.x0, region.z0),
+            )
+            current = shaped.dem
+            rivers = shaped.rivers
+            for lk in shaped.oxbows:
+                lakes.append(lk)
+            if shaped.waterfalls:
+                extra_falls = shaped.waterfalls
+            else:
+                extra_falls = []
+            shaped_mask, shaped_hw, shaped_dp, shaped_lv = rasterize_channels(
+                rivers, current.shape, cell_size=cs, origin=(region.x0, region.z0),
+                min_discharge=float(np.median(np.asarray(threshold_map))),
+            )
+            current = carve_footprint(
+                current, shaped_mask, shaped_hw, shaped_dp,
+                cell_size=cs, sea_level=sea, bank_flare=float(c["bank_flare"]),
+                level=shaped_lv, lake_mask=lake_mask,
+            )
+            diag_rivers = shaped.diagnostics
+            tick(0.78, "shaping rivers")
+        else:
+            extra_falls = []
+            diag_rivers = {}
+
         water_mask = np.zeros_like(dem, dtype=np.uint8)
         water_level = np.full_like(dem, DRY, dtype=np.float64)
 
@@ -187,6 +284,11 @@ class WaterSystem:
         channel = warped_accum >= threshold_map
         channel &= ~lake_mask
         channel &= ~ocean
+        if shaped_mask is not None:
+            # the migrated meanders are the channel now; union so the water mask covers
+            # every reach the shaper cut, including lateral excursions the accumulation
+            # raster never saw
+            channel = (channel | (shaped_mask & ~lake_mask & ~ocean))
 
         # ---- 6. mouths: let streams break through the beach berm into deep water ------
         # Only the berm itself is cut, and never below the shelf, so a river mouth
@@ -227,6 +329,11 @@ class WaterSystem:
 
         # ---- 9. waterfalls ------------------------------------------------------------
         waterfalls = detect_waterfalls(current, rivers, min_drop=float(c["waterfall_min_drop"]))
+        if extra_falls:
+            seen = {(round(x, 1), round(z, 1)) for x, z, _ in waterfalls}
+            for x, z, y in extra_falls:
+                if (round(x, 1), round(z, 1)) not in seen:
+                    waterfalls.append((x, z, y))
         for wx, wz, _wy in waterfalls[:4000]:
             cx = int((wx - region.x0) / cs)
             cz = int((wz - region.z0) / cs)
@@ -235,13 +342,23 @@ class WaterSystem:
                     water_mask[cz, cx] = 4
         tick(0.85, "water surfaces")
 
-        flow = flow_vectors(dirs, smooth=1)
+        if dinf and dinf_vec is not None:
+            flow = dinf_flow_vectors(dinf_vec, smooth=1)
+        else:
+            flow = flow_vectors(dirs, smooth=1)
         # dry cells keep the terrain gradient as their "flow" so wind/sediment maps still
         # have something continuous to read.
         dry = (water_mask == 0)
         flow[dry] = 0.0
 
+        tier_ids = classify_tiers(accum, threshold=float(np.median(np.asarray(threshold_map))))
         diag = {
+            "flow_model": "dinf" if dinf else "d8",
+            "accum_scale": round(float(accum_scale), 3),
+            "torrent_cells": float(np.count_nonzero(tier_ids == 1)),
+            "midriver_cells": float(np.count_nonzero(tier_ids == 2)),
+            "lowland_cells": float(np.count_nonzero(tier_ids == 3)),
+            **{f"river_{k}": v for k, v in (diag_rivers or {}).items()},
             "channels": float(np.count_nonzero(channel)),
             "lakes": float(len(lakes)),
             "waterfalls": float(len(waterfalls)),
@@ -259,6 +376,7 @@ class WaterSystem:
             rivers=rivers,
             lakes=lakes,
             waterfalls=waterfalls,
+            tiers=tier_ids.astype(np.uint8),
             diagnostics=diag,
         )
 

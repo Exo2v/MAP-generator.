@@ -82,6 +82,17 @@ DEFAULT_TERRAIN = {
     "island_radius": 0.30,
     "island_height": 30.0,
     "island_scale_factor": 0.40,
+    # --- structural ridgelines: spline-scattered arête / peak instances (spec 2.1) --
+    "ridge_count": 34,
+    "ridge_base_altitude": 210.0,
+    "ridge_sigma": 22.0,
+    "ridge_length_min": 140.0,
+    "ridge_length_max": 320.0,
+    "ridge_peak_ratio": 0.34,
+    "ridge_blend_k": 14.0,
+    "ridge_noise": 0.18,
+    "ridge_min_continent": 0.42,
+    "ridge_spine": [],            # optional [[x, z], ...] in block coordinates
     # --- volcanoes -----------------------------------------------------------------
     "volcano_count": 2,
     "volcano_radius": 130.0,
@@ -145,6 +156,7 @@ class TerrainGenerator:
         c = self.cfg
         seed = self.seed
         sea = float(c["sea_level"])
+        self.instances = []
         masks: Dict[str, np.ndarray] = {}
 
         def tick(f, label):
@@ -246,6 +258,42 @@ class TerrainGenerator:
         detail = detail * smoothstep(0.42, 0.52, cont) * aridity
 
         dem = base + mountains + plateaus + islands + rolling + hills + detail
+
+        # ---- 6b. structural ridgelines (spline-scattered instances) -------------------
+        # Spec 2.1: fault spline -> Poisson-spaced stations -> arête/peak primitives,
+        # composited with polynomial smooth-max so crests stay sharp and cols stay smooth.
+        from ..core.instances import default_spine, scatter_ridges, smooth_max
+
+        ridge_count = int(c.get("ridge_count", 0))
+        masks["ridge_instances"] = np.zeros(1, dtype=np.float32)
+        if ridge_count > 0:
+            spine = c.get("ridge_spine") or None
+            if spine:
+                spine = [(float(p[0]), float(p[1])) for p in spine]
+            else:
+                spine = default_spine(self.region)
+            relief, instances = scatter_ridges(
+                dem.shape, self.region,
+                waypoints=spine,
+                peak_count=ridge_count,
+                base_altitude=float(c.get("ridge_base_altitude", 210.0)),
+                ridge_sigma=float(c.get("ridge_sigma", 22.0)),
+                length_range=(float(c.get("ridge_length_min", 140.0)),
+                              float(c.get("ridge_length_max", 320.0))),
+                peak_ratio=float(c.get("ridge_peak_ratio", 0.34)),
+                blend_k=float(c.get("ridge_blend_k", 14.0)),
+                noise_amp=float(c.get("ridge_noise", 0.18)),
+                seed=seed + 131,
+            )
+            # only intrude where the cordillera rises above the surrounding macro terrain
+            intrudes = relief > dem
+            if np.any(intrudes):
+                dem = np.where(intrudes, smooth_max(dem, relief,
+                                                    float(c.get("ridge_blend_k", 14.0))), dem)
+            # keep ranges on land: fade the instances out under water
+            self.instances = instances
+            masks["ridge_relief"] = relief.astype(np.float32)
+        tick(0.30, "structural ridgelines")
 
         # ---- 7. volcanoes -------------------------------------------------------------
         volc_meta = []

@@ -133,6 +133,129 @@ def talus_relaxation(dem: np.ndarray, *, talus: float = 1.4, iterations: int = 2
     return dem
 
 
+def critical_angle_weathering(
+    dem: np.ndarray,
+    *,
+    critical_angle_deg: float = 38.0,
+    iterations: int = 15,
+    transfer_rate: float = 0.35,
+    cell_size: float = 1.0,
+) -> np.ndarray:
+    """Freeze-thaw rockfall limited by the critical angle of repose (spec 2.2).
+
+    ``theta_c`` is a *geological* angle (35-40 degrees for fractured rock), whereas
+    :func:`thermal_erosion` takes a rise-per-run talus value; converting here keeps the
+    knob honest and independent of the simulation cell size:
+
+        ``max_drop = tan(theta_c) * cell_size``
+
+    Material above that drop is displaced downhill along the direction of steepest
+    descent.  Total mass is conserved: everything removed from a steep cell is handed to
+    its receiver.
+    """
+    dem = np.asarray(dem, dtype=np.float64).copy()
+    h, w = dem.shape
+    max_drop = math.tan(math.radians(float(critical_angle_deg))) * float(cell_size)
+    if max_drop <= 0 or iterations <= 0:
+        return dem
+    rows, cols = np.mgrid[0:h, 0:w]
+
+    for _ in range(int(iterations)):
+        # steepest-descent receiver per cell (only strictly lower neighbours qualify)
+        best = np.zeros((h, w), dtype=np.float64)
+        bz = np.zeros((h, w), dtype=np.int64)
+        bx = np.zeros((h, w), dtype=np.int64)
+        best_drop = np.full((h, w), -np.inf)
+        for dz, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            rz = rows + dz
+            cx = cols + dx
+            valid = (rz >= 0) & (rz < h) & (cx >= 0) & (cx < w)
+            nz = np.clip(rz, 0, h - 1)
+            nx = np.clip(cx, 0, w - 1)
+            drop = np.where(valid, dem - dem[nz, nx], -np.inf)
+            better = drop > best_drop
+            best_drop = np.where(better, drop, best_drop)
+            bz = np.where(better, nz, bz)
+            bx = np.where(better, nx, bx)
+            best = np.where(better, drop, best)
+
+        excess = np.where(np.isfinite(best), best - max_drop, 0.0)
+        excess = np.maximum(excess, 0.0)
+        if not np.any(excess > 1e-9):
+            break
+        move = excess * float(transfer_rate)
+        dem -= move
+        received = np.zeros_like(dem)
+        np.add.at(received, (bz.ravel(), bx.ravel()), move.ravel())
+        dem += received
+    return dem
+
+
+def talus_aprons(
+    dem: np.ndarray,
+    *,
+    talus_deg: float = 36.0,
+    beta: float = 0.06,
+    cell_size: float = 4.0,
+    iterations: int = 6,
+    reach: int = 4,
+    transfer_rate: float = 0.5,
+) -> np.ndarray:
+    """Deposit parabolic scree fans below steep scarps (spec 2.2 A.4).
+
+    Below a cliff the colluvium surface relaxes to
+
+        ``H_talus(d) = H_base + d * tan(theta_c) - beta * d^2``
+
+    - a straight talus angle near the wall that flattens out towards the valley floor.
+    The routine takes material off cells steeper than the critical angle, carries it
+    downhill, and drops it into the concave foot zone weighted by that profile, which is
+    what produces the characteristic curved scree apron instead of a uniform slope.
+    """
+    dem = np.asarray(dem, dtype=np.float64).copy()
+    h, w = dem.shape
+    max_drop = math.tan(math.radians(float(talus_deg))) * float(cell_size)
+    reach = max(1, int(reach))
+    # weights along the fan: rise-per-cell then decaying quadratic flattening
+    d = np.arange(1, reach + 1, dtype=np.float64) * float(cell_size)
+    weights = np.maximum(d * math.tan(math.radians(float(talus_deg)))
+                         - float(beta) * d * d, 0.0)
+    if weights.sum() <= 0:
+        return dem
+    weights = weights / weights.sum()
+
+    for _ in range(max(0, int(iterations))):
+        slope_mag = np.hypot(*np.gradient(dem, float(cell_size)))
+        steep = slope_mag > max_drop / max(cell_size, 1e-6)
+        if not np.any(steep):
+            break
+        # downhill unit direction from the gradient
+        gy, gx = np.gradient(dem, float(cell_size))
+        mag = np.hypot(gx, gy)
+        mag = np.where(mag < 1e-9, 1.0, mag)
+        ux, uy = -gx / mag, -gy / mag
+        flux = np.where(steep, np.maximum(slope_mag * float(cell_size) - max_drop, 0.0)
+                        * float(transfer_rate), 0.0)
+        if not np.any(flux > 1e-9):
+            break
+        dem -= flux
+        deposit = np.zeros_like(dem)
+        for step in range(1, reach + 1):
+            dist = step * float(cell_size)
+            tx = np.rint(np.arange(w)[None, :] + ux * dist).astype(np.int64)
+            ty = np.rint(np.arange(h)[:, None] + uy * dist).astype(np.int64)
+            np.clip(tx, 0, w - 1, out=tx)
+            np.clip(ty, 0, h - 1, out=ty)
+            np.add.at(deposit, (ty, tx), flux * weights[step - 1])
+        # a fan can only fill ground, never build a tower: cap the deposit at the local
+        # profile so the apron stays concave
+        fy, fx = np.gradient(dem, float(cell_size))
+        concave = np.hypot(fy, fx) < max_drop / max(cell_size, 1e-6)
+        dem += np.where(concave, deposit, 0.0)
+    return dem
+
+
+
 def stream_power_erosion(
     dem: np.ndarray,
     *,
@@ -344,6 +467,8 @@ def hydraulic_erosion(
     sp_n: float = 1.0,
     sp_reference_area: float = 260.0,
     max_incision: float = 1.2,
+    critical_angle_deg: float = 38.0,
+    talus_aprons_beta: float = 0.0,
     droplets: int = 0,
     droplet_seed: int = 1337,
     deposit: float = 0.5,
@@ -363,9 +488,24 @@ def hydraulic_erosion(
     if thermal_iterations > 0:
         dem = thermal_erosion(dem, iterations=thermal_iterations, rate=thermal_rate,
                               cell_size=cell_size)
-        tick(0.35, "thermal erosion")
+        tick(0.28, "thermal erosion")
+    if critical_angle_deg > 0:
+        # freeze-thaw rockfall against a real angle of repose, then pile the debris into
+        # parabolic scree fans below the scarps
+        dem = critical_angle_weathering(
+            dem, critical_angle_deg=float(critical_angle_deg),
+            iterations=max(4, int(thermal_iterations) // 2),
+            transfer_rate=float(thermal_rate) * 1.4, cell_size=cell_size,
+        )
+        if talus_aprons_beta > 0:
+            dem = talus_aprons(dem, talus_deg=float(critical_angle_deg) - 2.0,
+                               beta=float(talus_aprons_beta), cell_size=cell_size,
+                               iterations=4, reach=4)
+        tick(0.35, "angle-of-repose weathering")
+    # stream-power law with the specification's exponents: E = K * A^m * S^n, m=0.5, n=1.0
     dem, accum = stream_power_erosion(
-        dem, cell_size=cell_size, iterations=sp_iterations, k=sp_k, m=sp_m, n=sp_n,
+        dem, cell_size=cell_size, iterations=sp_iterations, k=sp_k,
+        m=sp_m if sp_m else 0.5, n=sp_n if sp_n else 1.0,
         uplift=0.0, reference_area=sp_reference_area, max_incision=max_incision,
     )
     tick(0.7, "fluvial incision")

@@ -25,6 +25,7 @@ cells.
 from __future__ import annotations
 
 import heapq
+import math
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -501,6 +502,376 @@ def carve_channels(
         dem = carved
     return dem
 
+
+
+# --------------------------------------------------------------------------------------
+# D-infinity routing, stream-power incision and tiered channel cross-sections
+# (specification sections 2.3 A.2 - A.4)
+# --------------------------------------------------------------------------------------
+
+
+def dinf_flow(dem: np.ndarray, *, nodata: Optional[np.ndarray] = None,
+              flat_epsilon: float = 1e-6) -> Tuple[np.ndarray, np.ndarray]:
+    """D-infinity flow distribution - aspect-driven routing with continuous splitting.
+
+    Water leaving a cell is split between the two neighbours that straddle the steepest
+    descent *facet*, weighted by the exact angular position inside that facet (Tarboton
+    1997).  This is the continuous, aspect-driven alternative to D8's 45-degree
+    staircase that the specification calls for before stream-power incision (section
+    2.3 A.2): drainage organizes along the true fall line rather than snapping to eight
+    compass directions.
+
+    One well-known failure mode is handled explicitly: a facet plane fitted through a
+    narrow V-shaped valley floor and its two uphill neighbours points *back up the
+    walls*, so a pure facet router strands water exactly where rivers run.  Cells with no
+    usable facet therefore fall back to the D8 steepest neighbour, which is precisely the
+    case D8 resolves correctly.
+
+    Returns ``(fracs, vector)``: ``fracs`` is ``(h, w, 8)`` summing to 1 wherever the cell
+    drains somewhere, ``vector`` is the unit flow direction in world axes (``+x`` east,
+    ``+z`` south).
+    """
+    dem = np.asarray(dem, dtype=np.float64)
+    h, w = dem.shape
+    fracs = np.zeros((h, w, 8), dtype=np.float32)
+    vec = np.zeros((h, w, 2), dtype=np.float32)
+    if h < 3 or w < 3:
+        return fracs, vec
+
+    right = np.array([1, 2, 3, 4, 5, 6, 7, 0], dtype=np.int64)
+    cos45 = math.cos(math.pi / 4.0)
+    sin45 = math.sin(math.pi / 4.0)
+    step = math.pi / 4.0
+    best_slope = np.zeros((h, w), dtype=np.float64)
+    best_facet = np.full((h, w), -1, dtype=np.int8)
+    best_w1 = np.zeros((h, w), dtype=np.float64)   # weight on the facet's second edge
+
+    zz = np.arange(1, h - 1)[:, None]
+    xx = np.arange(1, w - 1)[None, :]
+    centre = dem[zz, xx]
+    for k in range(8):
+        k1 = int(right[k])
+        dz0, dx0 = _D8[k]
+        dz1, dx1 = _D8[k1]
+        s0 = (centre - dem[zz + dz0, xx + dx0]) / _D8_DIST[k]
+        s1 = (centre - dem[zz + dz1, xx + dx1]) / _D8_DIST[k1]
+        gx = s0
+        gy = (s1 - cos45 * s0) / sin45
+        r = np.arctan2(gy, gx)
+        inside = (r >= -1e-12) & (r <= step + 1e-12) & (gx > 0.0)
+        s_best = np.hypot(gx, gy)
+        w1 = np.clip(r / step, 0.0, 1.0)
+        better = inside & (s_best > best_slope[1:-1, 1:-1])
+        best_slope[1:-1, 1:-1] = np.where(better, s_best, best_slope[1:-1, 1:-1])
+        best_facet[1:-1, 1:-1] = np.where(better, np.int8(k), best_facet[1:-1, 1:-1])
+        best_w1[1:-1, 1:-1] = np.where(better, w1, best_w1[1:-1, 1:-1])
+
+    active = best_slope > max(flat_epsilon, 1e-9)
+    active[:1, :] = active[-1:, :] = False
+    active[:, :1] = active[:, -1:] = False
+    for k in range(8):
+        sel = active & (best_facet == k)
+        if not np.any(sel):
+            continue
+        k1 = int(right[k])
+        w1 = best_w1
+        fracs[..., k] = np.where(sel, 1.0 - w1, fracs[..., k]).astype(np.float32)
+        fracs[..., k1] = np.where(sel, w1, fracs[..., k1]).astype(np.float32)
+        dz0, dx0 = _D8[k]
+        dz1, dx1 = _D8[k1]
+        vx = (dx0 / _D8_DIST[k]) * (1.0 - w1) + (dx1 / _D8_DIST[k1]) * w1
+        vy = (dz0 / _D8_DIST[k]) * (1.0 - w1) + (dz1 / _D8_DIST[k1]) * w1
+        mag = np.hypot(vx, vy)
+        mag = np.where(mag < 1e-9, 1.0, mag)
+        vec[..., 0] = np.where(sel, vx / mag, vec[..., 0]).astype(np.float32)
+        vec[..., 1] = np.where(sel, vy / mag, vec[..., 1]).astype(np.float32)
+
+    # flats and V-notch floors: route with D8 so nothing strands (see docstring)
+    fallback = flow_directions(dem)
+    need = (~active) & (fallback >= 0)
+    if np.any(need):
+        for k in range(8):
+            sel = need & (fallback == k)
+            if not np.any(sel):
+                continue
+            fracs[..., k] = np.where(sel, 1.0, fracs[..., k]).astype(np.float32)
+            dz0, dx0 = _D8[k]
+            vec[..., 0] = np.where(sel, dx0 / _D8_DIST[k], vec[..., 0]).astype(np.float32)
+            vec[..., 1] = np.where(sel, dz0 / _D8_DIST[k], vec[..., 1]).astype(np.float32)
+        active = active | need
+
+    vec = np.where(active[..., None], vec, 0.0).astype(np.float32)
+    total = fracs.sum(axis=2, keepdims=True)
+    fracs = np.divide(fracs, total, out=np.zeros_like(fracs), where=total > 0)
+    if nodata is not None:
+        fracs[nodata] = 0.0
+        vec[nodata] = 0.0
+    return fracs, vec
+
+
+def dinf_accumulation(dem: np.ndarray, fracs: np.ndarray,
+                      weights: Optional[np.ndarray] = None) -> np.ndarray:
+    """Drainage area (in cells) using the D-infinity fractions from :func:`dinf_flow`."""
+    dem = np.asarray(dem, dtype=np.float64)
+    h, w = dem.shape
+    acc = np.ones((h, w), dtype=np.float64) if weights is None else np.array(weights, float).copy()
+    order = np.argsort(dem, axis=None)[::-1]
+    ys, xs = np.divmod(np.arange(h * w), w)
+    acc_flat = acc.ravel()
+    frac_flat = fracs.reshape(h * w, 8)
+    for idx in order:
+        share = acc_flat[idx]
+        if share <= 0:
+            continue
+        y, x = ys[idx], xs[idx]
+        for k in range(8):
+            f = frac_flat[idx, k]
+            if f <= 0:
+                continue
+            dz, dx = _D8[k]
+            ny, nx = y + dz, x + dx
+            if 0 <= ny < h and 0 <= nx < w:
+                acc_flat[ny * w + nx] += share * f
+    return acc
+
+
+def match_accumulation_scale(reference: np.ndarray, routed: np.ndarray,
+                             *, mask: Optional[np.ndarray] = None,
+                             quantile: float = 0.99, floor: float = 1.0) -> float:
+    """Scale factor that puts a D-infinity accumulation onto a D8 accumulation's scale.
+
+    Splitting flow between two neighbours - the whole point of D-infinity - lowers the
+    absolute drainage-area values a channel accumulates, because water is shared with the
+    parallel neighbour instead of being funnelled into one cell.  The network structure
+    is right but the *numbers* no longer line up with thresholds that were written for
+    D8 terrain (the specification's 500 / 5000 tier cut-offs, or a user's
+    ``water.river_threshold``).
+
+    This returns the ratio of high quantiles of the two fields, so callers can rescale
+    their thresholds and keep the cut-offs meaning "headwater", "mid-tier" and
+    "continental" rather than silently dropping every river.
+    """
+    ref = np.asarray(reference, dtype=np.float64)
+    new = np.asarray(routed, dtype=np.float64)
+    if mask is not None:
+        m = np.asarray(mask, dtype=bool)
+        ref, new = ref[m], new[m]
+    if ref.size == 0 or new.size == 0:
+        return max(float(floor), 1.0)
+    q_ref = float(np.quantile(ref, quantile))
+    q_new = float(np.quantile(new, quantile))
+    if q_new <= 1e-9 or q_ref <= 1e-9:
+        return max(float(floor), 1.0)
+    return max(float(floor), q_ref / q_new)
+
+
+def stream_power_incision(
+    dem: np.ndarray,
+    accum: np.ndarray,
+    *,
+    cell_size: float = 4.0,
+    k: float = 4.0e-3,
+    m: float = 0.5,
+    n: float = 1.0,
+    max_incision: float = 1.5,
+    min_discharge: float = 24.0,
+) -> np.ndarray:
+    """Stream-power law incision: ``dH = -K * A^m * |grad H|^n`` (spec 2.3 A.3).
+
+    Uses m = 0.5 / n = 1.0 by default, the conventional drainage-area and slope
+    exponents, and only touches cells carrying real discharge so hillslopes keep the
+    thermal-weathering signature instead of being uniformly etched.
+    """
+    dem = np.asarray(dem, dtype=np.float64)
+    dzdy, dzdx = np.gradient(dem, cell_size)
+    slope = np.hypot(dzdx, dzdy)
+    relative = np.maximum(accum, 1.0)
+    channel = accum >= float(min_discharge)
+    drop = k * np.power(relative, m) * np.power(np.maximum(slope, 1e-5), n)
+    drop = np.minimum(drop, float(max_incision))
+    return dem - np.where(channel, drop, 0.0)
+
+
+# channel tiers from the specification: headwater torrents, mid-tier rivers and
+# continental lowland rivers, each with its own cross-section shape.
+CHANNEL_TIERS = (
+    # (name, discharge_ceiling, width_coeff, depth_coeff, profile_exponent, alluvial)
+    ("torrent", 500.0, 0.085, 0.075, 1.10, 0.0),     # narrow V-shaped ravines
+    ("river", 5000.0, 0.135, 0.055, 1.60, 0.35),     # U-shaped braided channels
+    ("lowland", float("inf"), 0.190, 0.040, 2.10, 1.0),  # wide alluvial meander belt
+)
+
+
+def classify_tiers(accum: np.ndarray, *, threshold: float = 320.0) -> np.ndarray:
+    """0 = dry, 1 = headwater torrent, 2 = mid-tier river, 3 = lowland river."""
+    a = np.asarray(accum, dtype=np.float64)
+    tiers = np.zeros(a.shape, dtype=np.uint8)
+    cut = float(threshold)
+    tiers[a >= cut] = 1
+    tiers[a >= max(500.0, cut * 1.6)] = 2
+    tiers[a >= max(5000.0, cut * 8.0)] = 3
+    return tiers
+
+
+def tier_channel_geometry(accum: np.ndarray, *, cell_size: float, threshold: float = 320.0,
+                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-cell channel half-width (blocks), depth (blocks) and tier id.
+
+    Width follows ``W ~ Q^0.5`` and depth ``D ~ Q^0.4`` with per-tier coefficients, so
+    torrents are narrow and deep while lowland rivers are wide and shallow - the
+    hydraulic-geometry distinction the specification asks for.
+    """
+    a = np.maximum(np.asarray(accum, dtype=np.float64), 1.0)
+    tiers = classify_tiers(a, threshold=threshold)
+    width = np.zeros(a.shape, dtype=np.float64)
+    depth = np.zeros(a.shape, dtype=np.float64)
+    norm = a / max(float(threshold), 1.0)
+    for tid, (_name, _ceil, wc, dc, _exp, _allu) in enumerate(CHANNEL_TIERS, start=1):
+        sel = tiers == tid
+        if not np.any(sel):
+            continue
+        width = np.where(sel, wc * np.sqrt(norm) * np.sqrt(cell_size) * 1.6, width)
+        depth = np.where(sel, dc * np.power(norm, 0.4) * np.sqrt(cell_size) * 2.2, depth)
+    return width * 0.5, depth, tiers
+
+
+def carve_tiered_channels(
+    dem: np.ndarray,
+    accum: np.ndarray,
+    *,
+    cell_size: float,
+    threshold: float = 320.0,
+    bank_flare: float = 2.6,
+    sea_level: float = 63.0,
+    valley_depth_scale: float = 1.0,
+    passes: int = 2,
+    lake_mask: Optional[np.ndarray] = None,
+    alluvial_spread: float = 3.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Carve each channel tier with its own cross-section, plus lowland levees.
+
+    * torrents get a narrow, steep V (exponent ~1.1) that follows the slope;
+    * mid-tier rivers get a rounded U with braided gravel banks;
+    * lowland rivers get a wide, flat alluvial floor, and the ground beside them is
+      raised slightly into natural levees the way a flooding river builds them.
+
+    Returns ``(dem, tiers)``.
+    """
+    from scipy import ndimage
+
+    dem = np.asarray(dem, dtype=np.float64).copy()
+    half_width, depth, tiers = tier_channel_geometry(
+        accum, cell_size=cell_size, threshold=threshold
+    )
+    channel = tiers > 0
+    if not np.any(channel):
+        return dem, tiers
+
+    for _ in range(max(1, int(passes))):
+        dist, (iz, ix) = ndimage.distance_transform_edt(~channel, return_indices=True)
+        dist = dist * cell_size
+        near_w = np.where(channel, half_width, half_width[iz, ix])
+        near_d = np.where(channel, depth, depth[iz, ix])
+        near_t = np.where(channel, tiers, tiers[iz, ix])
+        bank = np.where(channel, dem, dem[iz, ix])
+
+        # per-cell profile exponent: sharp V for torrents, flat alluvial floor for lowland
+        expo = np.select([near_t <= 1, near_t == 2, near_t >= 3], [1.10, 1.60, 2.10],
+                         default=1.60)
+        # lowland channels spread their influence much wider than their water surface
+        reach = np.where(near_t >= 3, near_w * float(alluvial_spread), near_w)
+        t = np.clip(dist / np.maximum(reach * float(bank_flare), 1e-6), 0.0, 1.0)
+        profile = (1.0 - t) ** expo
+
+        sea_guard = sea_level - 6.0
+        target_depth = near_d * float(valley_depth_scale)
+        floor = np.maximum(bank - target_depth, np.minimum(bank, sea_guard))
+        carved = dem + np.minimum(profile * (floor - dem), 0.0)
+
+        # natural levees: a subtle ridge just outside the alluvial floor
+        if float(alluvial_spread) > 0:
+            levee_band = (near_t >= 3) & (dist > reach) & (dist < reach * 2.1)
+            levee = np.where(levee_band, np.minimum(target_depth * 0.16, 1.6), 0.0)
+            carved = carved + levee
+
+        carved = np.maximum(carved, np.minimum(dem, sea_guard))
+        if lake_mask is not None:
+            carved = np.where(lake_mask, dem, carved)
+        dem = carved
+    return dem, tiers
+
+
+
+def carve_footprint(
+    dem: np.ndarray,
+    mask: np.ndarray,
+    half_width: np.ndarray,
+    depth: np.ndarray,
+    *,
+    cell_size: float,
+    sea_level: float = 63.0,
+    bank_flare: float = 2.4,
+    level: Optional[np.ndarray] = None,
+    passes: int = 2,
+    lake_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Carve an explicit channel footprint into the terrain.
+
+    The accumulation-threshold carver infers its channel from discharge and then hopes
+    the flow raster agrees with the geometry.  Once rivers are *shaped* - graded beds and
+    migrated meanders - the channel is known exactly, so this carves the rasterised
+    footprint directly: every cell in ``mask`` gets a smooth V/U profile of the supplied
+    half width down to the supplied depth, and ``level`` (where present) pins the bed to
+    the river's own graded elevation so the long profile stays continuous.
+    """
+    from scipy import ndimage
+
+    dem = np.asarray(dem, dtype=np.float64).copy()
+    mask = np.asarray(mask, dtype=bool)
+    if not np.any(mask):
+        return dem
+    half = np.maximum(np.asarray(half_width, dtype=np.float64), 0.5)
+    dep = np.maximum(np.asarray(depth, dtype=np.float64), 0.25)
+
+    # One smooth profile carve: repeating it with the same mask is idempotent, and the
+    # graded bed is already continuous, so an extra pass would only soften the banks.
+    dist, (iz, ix) = ndimage.distance_transform_edt(~mask, return_indices=True)
+    dist = dist * float(cell_size)
+    local_w = np.where(mask, half, half[iz, ix])
+    local_d = np.where(mask, dep, dep[iz, ix])
+    bank = np.where(mask, dem, dem[iz, ix])
+    t = np.clip(dist / np.maximum(local_w * float(bank_flare), 1e-6), 0.0, 1.0)
+    profile = (1.0 - t) ** 1.7
+    sea_guard = sea_level - 6.0
+    floor = np.maximum(bank - local_d, np.minimum(bank, sea_guard))
+    if level is not None:
+        pin = np.asarray(level, dtype=np.float64)
+        has = np.isfinite(pin)
+        floor = np.where(has & mask, np.minimum(floor, pin), floor)
+    carved = dem + np.minimum(profile * (floor - dem), 0.0)
+    carved = np.maximum(carved, np.minimum(dem, sea_guard))
+    if lake_mask is not None:
+        carved = np.where(lake_mask, dem, carved)
+    _ = passes
+    return carved
+
+
+def dinf_flow_vectors(vec: np.ndarray, *, smooth: int = 1) -> np.ndarray:
+    """Smoothed unit vectors from :func:`dinf_flow`, matching ``flow_vectors`` output."""
+    vx = np.asarray(vec[..., 0], dtype=np.float64)
+    vy = np.asarray(vec[..., 1], dtype=np.float64)
+    for _ in range(max(0, int(smooth))):
+        for _pass in range(2):
+            arr = vx if _pass == 0 else vy
+            pad = np.pad(arr, 1, mode="edge")
+            blurred = (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:]) * 0.25
+            if _pass == 0:
+                vx = 0.5 * vx + 0.5 * blurred
+            else:
+                vy = 0.5 * vy + 0.5 * blurred
+    mag = np.hypot(vx, vy)
+    mag = np.where(mag < 1e-9, 1.0, mag)
+    return np.stack([vx / mag, vy / mag], axis=-1).astype(np.float32)
 
 def warp_field(field: np.ndarray, *, cell_size: float, seed: int, strength: float = 1.4,
                scale: float = 14.0, octaves: int = 2) -> np.ndarray:
