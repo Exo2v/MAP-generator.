@@ -143,6 +143,11 @@ def cmd_map(args: argparse.Namespace) -> int:
     result = run_pipeline(cfg, progress=_progress_printer())
     print()
     img = map_raster(result.terrain, args.kind, size=int(args.resolution))
+    if args.resolution and max(img.shape[:2]) < int(args.resolution):
+        # the raster is produced at simulation-cell resolution; scale the PNG up so the
+        # requested --resolution is what actually lands on disk
+        scale = max(1, int(args.resolution) // max(img.shape[:2]))
+        img = np.repeat(np.repeat(img, scale, axis=0), scale, axis=1)
     Image.fromarray(img).save(args.out)
     print(f"wrote {args.out} ({img.shape[1]}x{img.shape[0]})")
     return 0

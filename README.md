@@ -17,6 +17,12 @@ of four famous worldbuilding tools:
 Everything runs offline. There is no Java, no Minecraft install and no internet access
 involved in generating a world.
 
+| Elevation map | Biome map | Exported world, re-decoded from the `.mca` |
+| --- | --- | --- |
+| ![elevation](docs/img/cinematic-height.png) | ![biomes](docs/img/cinematic-biomes.png) | ![blocks](docs/img/exported-world-blocks.png) |
+
+*(all three are the `cinematic` / `worldmachine` presets: 768–384 blocks at cell size 4)*
+
 ---
 
 ## Quick start
