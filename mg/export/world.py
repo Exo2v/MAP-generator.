@@ -222,12 +222,38 @@ def export_world(
     chunk_status = str(export_cfg.get("chunk_status")
                        or ("minecraft:full" if decorate_in_engine else "minecraft:features"))
 
+    # ---- resume ---------------------------------------------------------------------
+    # A full 8,000 x 8,000 continent is a quarter of a million chunks and takes tens of
+    # minutes, and a chunk costs far more to generate than it does to look up.  With
+    # ``export.resume`` on, a chunk that is already in its region file on disk is skipped,
+    # so an interrupted export continues where it stopped.  The pipeline is deterministic,
+    # so what is already there is what would have been written.
+    resume = bool(export_cfg.get("resume", False))
+    _present: Dict[Tuple[int, int], set] = {}
+    skipped = 0
+
+    def already_written(cx: int, cz: int) -> bool:
+        rx = (region.x0 + cx * CHUNK) >> 9
+        rz = (region.z0 + cz * CHUNK) >> 9
+        key = (rx, rz)
+        if key not in _present:
+            _present[key] = _present_chunks(_region_file_path(region_dir, rx, rz))
+        return ((((region.x0 // CHUNK) + cx) & 31)
+                + ((((region.z0 // CHUNK) + cz) & 31) * 32)) in _present[key]
+
     chunks_x = region.blocks_x // CHUNK
     chunks_z = region.blocks_z // CHUNK
     for cz in range(chunks_z):
         for cx in range(chunks_x):
             if should_cancel and should_cancel():
                 raise RuntimeError("export cancelled")
+            if resume and already_written(cx, cz):
+                skipped += 1
+                done += 1
+                if progress and (done % 1024 == 0 or done == total_chunks):
+                    progress(done / max(total_chunks, 1),
+                             f"resuming: {skipped:,} chunks already on disk")
+                continue
             chunk = sampler.generate_chunk(cx, cz, decorate=decorate_in_engine)
             blocks_written += int(np.count_nonzero(chunk.blocks))
             writer = get_writer(cx, cz)
@@ -348,6 +374,24 @@ def _gzip(tag: Tag, compression_level: int = 6) -> bytes:
     from .nbt import write_nbt
 
     return write_nbt(tag, gzipped=True, compression_level=compression_level)
+
+
+def _region_file_path(region_dir: str, rx: int, rz: int) -> str:
+    return os.path.join(region_dir, f"r.{rx}.{rz}.mca")
+
+
+def _present_chunks(path: str) -> set:
+    """Chunk indices that already exist in an Anvil region file (empty if unreadable)."""
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path, "rb") as fh:
+            header = fh.read(4096)
+    except OSError:
+        return set()
+    if len(header) < 4096:
+        return set()
+    return {i for i in range(1024) if header[i * 4: i * 4 + 3] != b"\x00\x00\x00"}
 
 
 def _region_path(region_dir: str, writer: RegionFileWriter) -> str:

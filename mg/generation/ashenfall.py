@@ -532,6 +532,9 @@ ASHENFALL_PRESET: Dict[str, Any] = {
         # natively; the populate mask tells the game where.
         "decoration": "mods",
         "write_populate_mask": True,
+        # a quarter of a million chunks take tens of minutes to write, so the exporter
+        # skips chunks already on disk: an interrupted build continues where it stopped
+        "resume": True,
         "treeline": 225.0,
         "snowline": 200.0,
         "populate_noise_size": 64.0,

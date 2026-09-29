@@ -25,6 +25,54 @@ involved in generating a world.
 
 ---
 
+## The Ashenfall deliverable: the continent of Vantyra
+
+Alongside the generic presets the engine carries **one specified world**:
+`ASHENFALL_WORLD_MAP_MASTER_SPECIFICATION.pdf`'s 8,000 x 8,000 continent of Vantyra, built
+by a dedicated fourth-generation engine (`mg/generation/ashenfall.py` + `landform.py` +
+`landmarks.py`) rather than coaxed out of the generic chain. The turnkey command is the
+specification's own:
+
+```bash
+python generate_ashfall.py --res 2048 --out worldpainter     # the spec's command
+python generate_ashfall.py --out anvil --cell 4 --dir out    # a mod-ready Minecraft world
+python generate_ashfall.py --out both --cell 4               # both, one pass
+```
+
+| Output | What it is |
+| --- | --- |
+| `ASHENFALL_HEIGHTMAP_16BIT.png` | 16-bit heightfield, `uint16 = round(((Y + 64) / 384) * 65535)` |
+| `ASHENFALL_POPULATE_MASK.png` | the Still Life populate mask (spec §5, method 1) |
+| `ASHENFALL_WATER_MASK.png`, `..._SLOPE_MASK.png`, `..._SCREE_MASK.png`, `..._FROST_MASK.png`, `..._BIOME_MAP.png` | the build layers, one raster each |
+| `ASHENFALL_SURFACE_TABLE.json` | the spec §6 surface rule as data |
+| `ashenfall_worldpainter_setup.js` | JSR-223 script that reconstructs the world in WorldPainter |
+| `<dir>/minecraft/Ashenfall/` | a real Java 1.21.1 save: `level.dat` + Anvil region files |
+
+The nine cardinal landmarks sit at their specified coordinates and elevations - The
+Forgotten Coast (spawn) `(0, 68, 2500)`, the Cogwork March `(-2100, 0)`, the Ashen Caldera
+`(0, 0)` with its 146-block rim and 92-block Obsidian Throne, the Solitary Glacial Spine
+`(0, -2500)`, the Gilded Dunes `(2300, 0)` with black-glass crests, the Whispering Fen
+`(2000, 2000)`, the Sunken Reach `(-2400, 1600)`, the Hermit's Spire `(-1800, -1800)` and
+the Byzantine Choir `(1800, -1800)` - inside a finite continent whose shelf falls away
+along the spec's cubic Hermite dropoff (`t = clamp((r - 3300) / 500)`,
+`H_drop = -600 * (3t^2 - 2t^3)`) into the Veil of Salt.
+
+**The export is deliberately left undecorated**, exactly as spec §5 method 1 requires:
+chunks are written as `minecraft:features`, never `minecraft:full`, so Lithosphere and
+Still Life place their own features when the world loads, driven by the populate mask
+instead of by our guesses. The same preset is available everywhere else in the app:
+
+```bash
+python3 -m mg.cli generate --preset ashenfall --out ~/.minecraft/saves   # cell size 4
+python3 -m mg.cli presets                                                # includes "Ashenfall - Vantyra"
+```
+
+A full-resolution build (cell size 4 -> 4,000,000 simulation cells, 250,000 chunks) takes
+roughly ten minutes to generate and forty to export on two cores; `export.resume` is on,
+so an interrupted export continues from the chunks already written.
+
+---
+
 ## Quick start
 
 ### 1. Run it live in a browser (no install)
@@ -61,7 +109,7 @@ message instead of a crash. Windows one-click: `tools\build_exe.bat`.
 ### 4. Drive it from the command line
 
 ```bash
-python3 -m mg.cli presets                                  # list the 7 presets
+python3 -m mg.cli presets                                  # list the 8 presets
 python3 -m mg.cli generate --preset cinematic --size 2048 --seed 42 --out ~/.minecraft/saves
 python3 -m mg.cli map      --preset desert --size 1024 --kind biome --resolution 2048 --out desert.png
 python3 -m mg.cli inspect  --preset rainforest --size 512 --x 128 --z 128
