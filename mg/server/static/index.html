@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mapgen — terrain studio</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <span class="logo">◈</span>
+      <div>
+        <h1>mapgen <span class="tag">terrain studio</span></h1>
+        <p class="sub">World Machine erosion · World Painter layers · Lithosphere climate · Still Life population · Streams hydrology</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-generate" class="primary">Generate world</button>
+      <button id="btn-cancel" class="ghost" disabled>Cancel</button>
+      <span id="job-badge" class="badge idle">idle</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ─────────────────────────── left: parameters ─────────────────────────── -->
+    <aside class="panel left">
+      <section>
+        <h2>Preset</h2>
+        <select id="preset"></select>
+        <p id="preset-desc" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>World</h2>
+        <label>Name <input type="text" id="world-name" value="My World" /></label>
+        <label>Seed
+          <span class="row">
+            <input type="number" id="seed" value="20240929" />
+            <button class="mini" id="btn-dice" title="random seed">🎲</button>
+          </span>
+        </label>
+        <div class="grid2">
+          <label>Width (blocks) <input type="number" id="blocks-x" value="1024" step="128" min="128" /></label>
+          <label>Depth (blocks) <input type="number" id="blocks-z" value="1024" step="128" min="128" /></label>
+        </div>
+        <label>Simulation cell size <span id="cell-val" class="val">4</span> blocks
+          <input type="range" id="cell-size" min="1" max="16" value="4" />
+        </label>
+        <p class="hint" id="size-hint"></p>
+      </section>
+
+      <section>
+        <h2>Climate <span class="h2note">Lithosphere logic</span></h2>
+        <label>Warmth bias <span id="tb-val" class="val">0.00</span>
+          <input type="range" id="temp-bias" min="-0.4" max="0.4" step="0.01" value="0" />
+        </label>
+        <label>Humidity bias <span id="hb-val" class="val">0.00</span>
+          <input type="range" id="hum-bias" min="-0.4" max="0.4" step="0.01" value="0" />
+        </label>
+        <label>Rain shadow <span id="rs-val" class="val">1.00</span>
+          <input type="range" id="rain-shadow" min="0" max="2" step="0.05" value="1" />
+        </label>
+        <label>Wind direction <span id="wd-val" class="val">90°</span>
+          <input type="range" id="wind-dir" min="0" max="360" step="5" value="90" />
+        </label>
+        <label>Climate region size <span id="cs-val" class="val">2.40</span>×
+          <input type="range" id="climate-scale" min="0.8" max="6" step="0.05" value="2.4" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Terrain <span class="h2note">World Machine</span></h2>
+        <label>Land fraction <span id="lf-val" class="val">0.62</span>
+          <input type="range" id="land-fraction" min="0.15" max="0.95" step="0.01" value="0.62" />
+        </label>
+        <label>Mountain height <span id="mh-val" class="val">148</span>
+          <input type="range" id="mountain-height" min="40" max="260" step="2" value="148" />
+        </label>
+        <label>Mountain density <span id="md-val" class="val">0.44</span>
+          <input type="range" id="mountain-threshold" min="0.12" max="0.9" step="0.01" value="0.44" />
+        </label>
+        <label>Plateau amount <span id="pa-val" class="val">0.20</span>
+          <input type="range" id="plateau" min="0" max="1" step="0.01" value="0.2" />
+        </label>
+        <label>Cliffs / coast <span id="cl-val" class="val">0.65</span>
+          <input type="range" id="cliffs" min="0" max="1.5" step="0.01" value="0.65" />
+        </label>
+        <label>Islands <span id="is-val" class="val">18</span>
+          <input type="range" id="islands" min="0" max="60" step="1" value="18" />
+        </label>
+        <label>Terracing <span id="tr-val" class="val">0.00</span>
+          <input type="range" id="terrace" min="0" max="1" step="0.01" value="0" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Diffusion &amp; erosion</h2>
+        <label>Smoothing <span id="df-val" class="val">0.32</span>
+          <input type="range" id="diffusion" min="0" max="1" step="0.01" value="0.32" />
+        </label>
+        <label>Thermal passes <span id="th-val" class="val">16</span>
+          <input type="range" id="thermal" min="0" max="60" step="1" value="16" />
+        </label>
+        <label>Fluvial strength <span id="fk-val" class="val">0.55</span>
+          <input type="range" id="fluvial-k" min="0" max="1.5" step="0.01" value="0.55" />
+        </label>
+        <label>Fluvial passes <span id="fi-val" class="val">12</span>
+          <input type="range" id="fluvial-iters" min="0" max="40" step="1" value="12" />
+        </label>
+        <label>Rain droplets <span id="dr-val" class="val">0</span>
+          <input type="range" id="droplets" min="0" max="300000" step="10000" value="0" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Water <span class="h2note">Streams logic</span></h2>
+        <label>River threshold <span id="rt-val" class="val">320</span>
+          <input type="range" id="river-threshold" min="60" max="2000" step="10" value="320" />
+        </label>
+        <label>Valley depth <span id="vd-val" class="val">1.00</span>
+          <input type="range" id="valley-depth" min="0.2" max="2.5" step="0.05" value="1" />
+        </label>
+        <label>Bank flare <span id="bf-val" class="val">2.60</span>
+          <input type="range" id="bank-flare" min="0.8" max="6" step="0.1" value="2.6" />
+        </label>
+        <label>Meander <span id="mn-val" class="val">1.40</span>
+          <input type="range" id="meander" min="0" max="4" step="0.1" value="1.4" />
+        </label>
+        <label>Carve passes <span id="cp-val" class="val">2</span>
+          <input type="range" id="carve-passes" min="1" max="4" step="1" value="2" />
+        </label>
+        <label>Lake depth filter <span id="lk-val" class="val">0.90</span>
+          <input type="range" id="lake-depth" min="0.2" max="4" step="0.1" value="0.9" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Population <span class="h2note">Still Life</span></h2>
+        <label>Settlements <span id="pc-val" class="val">14</span>
+          <input type="range" id="poi-count" min="0" max="60" step="1" value="14" />
+        </label>
+        <label>Tree density <span id="td-val" class="val">1.00</span>
+          <input type="range" id="tree-density" min="0" max="3" step="0.05" value="1" />
+        </label>
+        <label>Shrub density <span id="sd-val" class="val">1.00</span>
+          <input type="range" id="shrub-density" min="0" max="3" step="0.05" value="1" />
+        </label>
+        <label>Ore veins <span id="ov-val" class="val">90</span>
+          <input type="range" id="ore-veins" min="0" max="400" step="5" value="90" />
+        </label>
+        <label class="check"><input type="checkbox" id="roads" checked /> Connect settlements with roads</label>
+      </section>
+
+      <section>
+        <h2>Export</h2>
+        <label>Output folder <input type="text" id="output-dir" placeholder="choose a folder…" /></label>
+        <label class="check"><input type="checkbox" id="exp-level" checked /> level.dat + session.lock</label>
+        <label class="check"><input type="checkbox" id="exp-maps" checked /> PNG map bundle</label>
+        <label class="check"><input type="checkbox" id="exp-structs" checked /> structures &amp; vegetation</label>
+        <label class="check"><input type="checkbox" id="exp-caves" checked /> caves &amp; ravines</label>
+        <label class="check"><input type="checkbox" id="exp-veg" checked /> vegetation blocks</label>
+        <label>Minecraft version
+          <select id="mc-version">
+            <option value="1.21">1.21 (data 3953)</option>
+            <option value="1.20">1.20.1 (data 3465)</option>
+            <option value="1.19">1.19.4 (data 3337)</option>
+          </select>
+        </label>
+        <button id="btn-export" class="secondary">Export world</button>
+        <p class="hint" id="export-hint"></p>
+      </section>
+    </aside>
+
+    <!-- ─────────────────────────── center: viewport ─────────────────────────── -->
+    <section class="viewport-wrap">
+      <div class="viewport-toolbar">
+        <div class="group">
+          <span class="lbl">colour</span>
+          <select id="color-mode">
+            <option value="biome">Biome</option>
+            <option value="height">Height</option>
+            <option value="temperature">Temperature</option>
+            <option value="humidity">Humidity</option>
+            <option value="population">Population</option>
+            <option value="fertility">Fertility</option>
+            <option value="discharge">Rivers (discharge)</option>
+            <option value="slope">Slope</option>
+            <option value="continentality">Continentality</option>
+            <option value="soil">Soil depth</option>
+            <option value="shaded">Plain shaded</option>
+          </select>
+        </div>
+        <div class="group">
+          <span class="lbl">relief</span>
+          <input type="range" id="exaggeration" min="0.4" max="3" step="0.05" value="1" />
+          <span class="val" id="exag-val">1.00×</span>
+        </div>
+        <div class="group">
+          <span class="lbl">sun</span>
+          <input type="range" id="sun-azimuth" min="0" max="360" step="5" value="315" />
+          <input type="range" id="sun-height" min="10" max="90" step="5" value="48" />
+        </div>
+        <div class="group">
+          <label class="check"><input type="checkbox" id="show-water" checked /> water</label>
+          <label class="check"><input type="checkbox" id="show-rivers" checked /> rivers</label>
+          <label class="check"><input type="checkbox" id="show-roads" checked /> roads</label>
+          <label class="check"><input type="checkbox" id="show-pois" checked /> POIs</label>
+          <label class="check"><input type="checkbox" id="wireframe" /> wire</label>
+        </div>
+        <div class="group right">
+          <button class="mini" id="btn-view-top">top</button>
+          <button class="mini" id="btn-view-iso">iso</button>
+          <button class="mini" id="btn-view-seaside">coast</button>
+          <button class="mini" id="btn-export-png" title="save this view as PNG">⤓ png</button>
+        </div>
+      </div>
+
+      <div id="viewport">
+        <div id="loading" class="overlay hidden"><div class="spinner"></div><span id="loading-text">generating…</span></div>
+        <div id="empty-state" class="overlay">
+          <h3>No world yet</h3>
+          <p>Pick a preset, tune the sliders, then hit <strong>Generate world</strong>.</p>
+          <p class="hint">Tip: click anywhere on the terrain to inspect the column — or grab an existing world from
+             the <em>Maps</em> tab.</p>
+        </div>
+        <div id="hover-tip" class="hover-tip hidden"></div>
+        <div class="view-legend" id="view-legend"></div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress"><div class="bar" id="progress-bar"></div></div>
+        <div class="progress-label"><span id="progress-text">ready</span><span id="progress-pct">0%</span></div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────── right: data ─────────────────────────── -->
+    <aside class="panel right">
+      <nav class="tabs">
+        <button class="tab active" data-tab="stats">Stats</button>
+        <button class="tab" data-tab="maps">Maps</button>
+        <button class="tab" data-tab="inspect">Inspect</button>
+        <button class="tab" data-tab="export">Export</button>
+        <button class="tab" data-tab="help">Help</button>
+      </nav>
+
+      <div class="tab-body" id="tab-stats">
+        <div id="stats-empty" class="muted">Generate a world to see the readout.</div>
+        <div id="stats-body" class="hidden">
+          <div class="stat-grid" id="stat-grid"></div>
+          <h3>Stage timings</h3>
+          <table class="table" id="stage-table"></table>
+          <h3>Biome coverage</h3>
+          <div id="biome-list" class="biome-list"></div>
+          <h3>Settlements</h3>
+          <table class="table" id="poi-table"></table>
+        </div>
+      </div>
+
+      <div class="tab-body hidden" id="tab-maps">
+        <div class="row">
+          <select id="map-kind"></select>
+          <button class="mini" id="btn-map-reload">refresh</button>
+          <a class="mini" id="map-download" download>⤓</a>
+        </div>
+        <div class="map-frame"><img id="map-img" alt="map" /><div class="map-empty" id="map-empty">no map yet</div></div>
+        <p class="hint">Rendered from the live generation grid — the same rasters land in <code>maps/</code> on export.</p>
+      </div>
+
+      <div class="tab-body hidden" id="tab-inspect">
+        <p class="hint">Click the terrain (or type coordinates) to read the column.</p>
+        <div class="grid2">
+          <label>X <input type="number" id="insp-x" value="0" /></label>
+          <label>Z <input type="number" id="insp-z" value="0" /></label>
+        </div>
+        <div id="inspect-body" class="muted">No sample yet.</div>
+      </div>
+
+      <div class="tab-body hidden" id="tab-export">
+        <p class="hint">Writes a complete Java world: <code>region/*.mca</code>, <code>level.dat</code>,
+           <code>mapgen.json</code> and the map bundle.</p>
+        <label>Output folder <input type="text" id="output-dir-2" /></label>
+        <button class="secondary" id="btn-export-2">Export world</button>
+        <div id="export-result" class="muted"></div>
+      </div>
+
+      <div class="tab-body hidden" id="tab-help">
+        <h3>How this generator works</h3>
+        <ol class="help">
+          <li><strong>Climate</strong> — large-scale temperature/humidity regions with latitude bands,
+              altitude lapse rate and advected orographic rainfall (rain shadow behind ridges).</li>
+          <li><strong>Terrain</strong> — continent spline → mountain belts → plateaus → islands →
+              volcanoes → hills → detail; then coastal shaping and multi-scale diffusion.</li>
+          <li><strong>Erosion</strong> — thermal hillslope diffusion, stream-power incision
+              (<code>E ∝ A<sup>m</sup>S<sup>n</sup></code>), optional droplet erosion and alluvial deposition.</li>
+          <li><strong>Hydrology</strong> — depression filling, D8 routing with a smoothed flow field,
+              drainage accumulation, watershed labelling, hydraulic-geometry carving
+              (<code>W ∝ Q<sup>0.5</sup></code>, <code>D ∝ Q<sup>0.4</sup></code>) and lake/ocean surfaces.</li>
+          <li><strong>Biomes</strong> — Whittaker classification with mountain/snow/swamp/mesa specials.</li>
+          <li><strong>Population</strong> — fertility and population fields, stratified vegetation scatter,
+              settlement scoring with Poisson-disk thinning, A* roads and ore veins.</li>
+          <li><strong>Export</strong> — block-level surface profiles, caves, vegetation, structures,
+              Anvil region files, heightmaps and a full map bundle.</li>
+        </ol>
+        <p class="hint">Every world is reproducible from its seed + <code>mapgen.json</code>.</p>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script src="/static/three.min.js"></script>
+<script src="/static/controls.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

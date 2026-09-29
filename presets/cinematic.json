@@ -1,0 +1,303 @@
+{
+  "seed": 20240929,
+  "name": "New World",
+  "preset": "cinematic",
+  "region": {
+    "x0": 0,
+    "z0": 0,
+    "blocks_x": 1024,
+    "blocks_z": 1024,
+    "cell_size": 4
+  },
+  "terrain": {
+    "sea_level": 63.0,
+    "continent_region_factor": 2.9,
+    "continent_scale": 0.0,
+    "continent_octaves": 6,
+    "coast_sharpness": 0.18,
+    "land_fraction": 0.58,
+    "base_spline": [
+      [
+        0.0,
+        18.0
+      ],
+      [
+        0.2,
+        32.0
+      ],
+      [
+        0.38,
+        48.0
+      ],
+      [
+        0.46,
+        57.0
+      ],
+      [
+        0.5,
+        62.5
+      ],
+      [
+        0.55,
+        67.0
+      ],
+      [
+        0.63,
+        72.0
+      ],
+      [
+        0.72,
+        79.0
+      ],
+      [
+        0.86,
+        90.0
+      ],
+      [
+        1.0,
+        104.0
+      ]
+    ],
+    "mountain_region_factor": 1.15,
+    "mountain_mask_scale": 0.0,
+    "mountain_threshold": 0.44,
+    "mountain_sharpness": 0.34,
+    "mountain_height": 152.0,
+    "mountain_ridge_factor": 0.34,
+    "mountain_ridge_scale": 0.0,
+    "mountain_ridge_power": 1.35,
+    "mountain_octaves": 6,
+    "mountain_min_continent": 0.42,
+    "plateau_amount": 0.2,
+    "plateau_factor": 0.55,
+    "plateau_scale": 0.0,
+    "plateau_steps": 4,
+    "island_count": 18,
+    "island_radius": 0.3,
+    "island_height": 30.0,
+    "island_scale_factor": 0.4,
+    "volcano_count": 2,
+    "volcano_radius": 130.0,
+    "volcano_height": 95.0,
+    "hill_amp": 17.0,
+    "hill_factor": 0.3,
+    "hill_scale": 0.0,
+    "rolling_amp": 30.0,
+    "rolling_factor": 0.72,
+    "rolling_scale": 0.0,
+    "detail_amp": 3.2,
+    "detail_scale": 110.0,
+    "roughness_arid_boost": 0.45,
+    "cliff_amount": 0.75,
+    "cliff_height": 13.0,
+    "coast_smoothing": 0.9,
+    "diffusion": 0.38,
+    "flatten_lowlands": 0.3,
+    "terrace": 0.0
+  },
+  "climate": {
+    "sea_level": 63.0,
+    "region_scale": 0.0,
+    "region_scale_factor": 2.4,
+    "region_octaves": 4,
+    "temperature_bias": 0.0,
+    "humidity_bias": 0.0,
+    "latitude_span": 1.3,
+    "polar_curve": 2.1,
+    "latitude_band_noise": 0.45,
+    "lapse_rate_per_block": 0.005263157894736842,
+    "wind_direction": 90.0,
+    "wind_speed": 0.5,
+    "moisture_steps": 26,
+    "rain_shadow_strength": 1.0
+  },
+  "water": {
+    "sea_level": 63.0,
+    "river_threshold": 420.0,
+    "climate_river_bias": 0.75,
+    "valley_depth": 1.15,
+    "bank_flare": 3.0,
+    "carve_passes": 2,
+    "lake_min_depth": 0.9,
+    "lake_min_cells": 5,
+    "max_lakes": 240,
+    "waterfall_min_drop": 3.5,
+    "coast_mouth_dig": 1.0,
+    "enforce_downhill": 1.0,
+    "floodplain_width": 0.35,
+    "meander_strength": 1.0
+  },
+  "biomes": {
+    "highland_band": 42.0,
+    "alpine_band": 88.0,
+    "peak_band": 150.0,
+    "beach_height": 3.0,
+    "beach_max_slope": 0.3,
+    "shallow_depth": 12.0,
+    "deep_depth": 48.0,
+    "swamp_max_slope": 0.16,
+    "swamp_max_elev": 10.0,
+    "snowline_base": 148.0,
+    "snowline_temp_drop": 46.0,
+    "temp_optimum": 0.55,
+    "moisture_exponent": 0.85,
+    "fertility_slope_cut": 1.15,
+    "fertility_alt_cut": 190.0,
+    "population_slope_cut": 1.45,
+    "water_influence_cells": 14.0,
+    "water_bonus": 0.32,
+    "matrix": [
+      [
+        "snowy_plains",
+        "snowy_taiga",
+        "snowy_taiga",
+        "grove",
+        "grove"
+      ],
+      [
+        "cold_shrubland",
+        "taiga",
+        "taiga",
+        "old_growth_taiga",
+        "old_growth_taiga"
+      ],
+      [
+        "highland_steppe",
+        "plains",
+        "temperate_forest",
+        "old_growth_temperate_forest",
+        "windswept_hills"
+      ],
+      [
+        "xeric_shrubland",
+        "meadow",
+        "fertile_valley",
+        "temperate_forest",
+        "swamp"
+      ],
+      [
+        "desert",
+        "savanna",
+        "humid_savanna",
+        "sparse_jungle",
+        "jungle"
+      ],
+      [
+        "desert",
+        "savanna",
+        "humid_savanna",
+        "sparse_jungle",
+        "tropical_rainforest"
+      ]
+    ]
+  },
+  "population": {
+    "poi_count": 14,
+    "min_poi_separation_cells": 22,
+    "hamlet_ratio": 0.55,
+    "ruin_ratio": 0.2,
+    "outpost_ratio": 0.15,
+    "landmark_ratio": 0.1,
+    "road_connect_distance_cells": 90,
+    "road_max_links": 2,
+    "road_curve_cost": 2.4,
+    "road_water_cost": 55.0,
+    "road_slope_cost": 22.0,
+    "tree_density": 1.0,
+    "shrub_density": 1.0,
+    "flower_density": 0.6,
+    "boulder_density": 0.35,
+    "ore_veins": 90,
+    "ore_vein_radius": 3.2,
+    "buried_treasure": 0.06,
+    "port_chance": 0.35
+  },
+  "surface": {
+    "detail_amplitude": 1.35,
+    "detail_scale": 42.0,
+    "micro_scale": 11.0,
+    "micro_amplitude": 0.45,
+    "rock_patch_scale": 60.0,
+    "snow_line_softness": 6.0,
+    "beach_sand_depth": 3.0,
+    "caves": 0.55,
+    "cave_scale": 78.0,
+    "cave_threshold": 0.72,
+    "cave_min_depth": 6.0,
+    "cave_max_y": 90.0,
+    "ravines": 0.18,
+    "ravine_scale": 260.0,
+    "water_depth": 1.0,
+    "ice_on_water": true,
+    "deepslate_start": 8,
+    "vegetation_in_export": 1.0,
+    "structures_in_export": 1.0
+  },
+  "erosion": {
+    "enabled": true,
+    "diffusion": 0.5,
+    "thermal_iterations": 18,
+    "thermal_rate": 0.26,
+    "fluvial_iterations": 12,
+    "fluvial_k": 0.5,
+    "fluvial_m": 0.6,
+    "fluvial_n": 1.0,
+    "max_incision": 1.2,
+    "droplets": 0,
+    "deposition": 0.5,
+    "channel_smoothing": 1.1
+  },
+  "export": {
+    "output_dir": "",
+    "world_name": "",
+    "dimension": "overworld",
+    "min_y": -64,
+    "max_y": 320,
+    "version": "1.21",
+    "data_version": 3953,
+    "compression": 2,
+    "chunk_batch": 512,
+    "write_level_dat": true,
+    "write_bundle": true,
+    "bundle_maps": [
+      "height",
+      "biome",
+      "climate",
+      "population",
+      "flow",
+      "water",
+      "soil"
+    ],
+    "write_schematic": false,
+    "schematic_chunks": 4,
+    "structures": true,
+    "vegetation": true,
+    "caves": true,
+    "spawn_in_center": true,
+    "generate_png_maps": true
+  },
+  "preview": {
+    "mesh_size": 192,
+    "vertex_stride": 2,
+    "show_water": true,
+    "show_biomes": true,
+    "show_flow": false,
+    "show_roads": true,
+    "show_pois": true,
+    "sun_angle": 45.0,
+    "sun_azimuth": 315.0,
+    "exaggeration": 1.0,
+    "water_opacity": 0.78,
+    "maps": [
+      "height",
+      "biome",
+      "water",
+      "flow",
+      "population",
+      "climate",
+      "slope",
+      "hillshade",
+      "discharge"
+    ]
+  }
+}
