@@ -157,6 +157,85 @@ class TestPipeline(unittest.TestCase):
             self.assertGreater(float(h.max() - h.min()), 5.0, f"{preset} is flat")
 
 
+class TestNoPonding(unittest.TestCase):
+    """Shaped landforms must not be flooded by the depression filler.
+
+    The Ashenfall engine is built from *stamped* landforms - quarry benches, dune fields,
+    a caldera rim - and each of them encloses closed sub-basins that ``fill_lakes`` would
+    turn into ponds.  ``no_water`` is too blunt for them (it suppresses the rivers that
+    legitimately cross the region too), so the water system takes a weaker ``no_lake``
+    mask: no standing water there, but the terrain and its channels are untouched.
+    """
+
+    N = 64
+
+    def _dem(self):
+        """A plane with two closed bowls, both above sea level so both can hold a lake."""
+        n = self.N
+        y, x = np.mgrid[0:n, 0:n]
+        dem = np.full((n, n), 96.0)
+        for cx, cz in ((18.0, 18.0), (46.0, 46.0)):
+            r = np.hypot(x - cx, y - cz)
+            dem -= np.clip(16.0 - r * 1.1, 0.0, 16.0)
+        return dem
+
+    def _build(self, **kw):
+        from mg.generation.climate import ClimateModel
+        from mg.generation.water import WaterSystem
+
+        cfg = default_config()
+        cfg.region = RegionInfo(blocks_x=self.N * 4, blocks_z=self.N * 4, cell_size=4)
+        dem = self._dem()
+        X, Y = np.meshgrid(np.arange(self.N, dtype=float), np.arange(self.N, dtype=float))
+        climate = ClimateModel(cfg.to_dict(), cfg.region, cfg.seed).compute(X, Y)
+        return WaterSystem(cfg.to_dict(), cfg.region, cfg.seed).build(dem, climate, **kw)
+
+    @staticmethod
+    def _mask():
+        mask = np.zeros((TestNoPonding.N, TestNoPonding.N), dtype=bool)
+        mask[6:30, 6:30] = True          # covers the first bowl, not the second
+        return mask
+
+    def test_control_actually_ponds(self):
+        out = self._build()
+        lakes = out.water_mask == 2
+        self.assertGreater(int(lakes.sum()), 0, "the control must pond, or the rest proves nothing")
+        self.assertGreater(int(lakes[self._mask()].sum()), 0,
+                           "at least one lake must sit inside the region to be masked")
+
+    def test_no_lake_removes_the_pond_but_leaves_the_rest_alone(self):
+        mask = self._mask()
+        out = self._build(no_lake=mask)
+        self.assertEqual(int((out.water_mask[mask] == 2).sum()), 0,
+                         "no standing water inside a no-pond region")
+        outside = ~mask
+        self.assertGreater(int((out.water_mask[outside] == 2).sum()), 0,
+                           "the mask must be surgical - the other bowl still ponds")
+
+    def test_no_lake_lets_rivers_through_where_no_water_would_not(self):
+        """The whole reason two masks exist.
+
+        ``no_water`` is absolute and takes the rivers with it, which is correct for a lava
+        basin but wrong for a quarry or a dune field that a river plainly crosses.
+        ``no_lake`` has to remove the pond and leave the channel network intact.
+        """
+        mask = self._mask()
+        weak = self._build(no_lake=mask)
+        hard = self._build(no_water=mask)
+        through_weak = int(((weak.water_mask == 1) & mask).sum())
+        through_hard = int(((hard.water_mask == 1) & mask).sum())
+        self.assertGreater(through_weak, 0,
+                           "no_lake must still let a channel run through the region")
+        self.assertEqual(through_hard, 0,
+                         "no_water must remain absolute - that is what it is for")
+
+    def test_no_water_is_still_absolute(self):
+        mask = self._mask()
+        out = self._build(no_water=mask)
+        self.assertEqual(int((out.water_mask[mask] > 0).sum()), 0,
+                         "no_water stays absolute: nothing wet at all, rivers included")
+
+
 class TestConfig(unittest.TestCase):
     def test_round_trip(self):
         cfg = default_config()

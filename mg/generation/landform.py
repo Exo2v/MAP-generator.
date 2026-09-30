@@ -16,7 +16,7 @@ The module returns, alongside the shaped DEM:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -30,6 +30,17 @@ VEIL_NAME = "veil_of_salt"
 #: Which material family each landmark stamps.  Used by the surface rules.
 BARE_KINDS = ("caldera", "dunes", "cordillera", "spires", "quarry")
 
+#: Landforms that must not pond, because they are *shaped* rather than eroded and so are
+#: riddled with closed sub-basins: quarry benches step down into themselves, dune swales
+#: are walled in by crests, and the caldera rim encircles its surroundings.  The
+#: depression filler floods all of them, and water standing in a desert dune field or a
+#: drained quarry is not a plausible reading of the specification.
+#:
+#: Deliberately absent: the Whispering Fen and the Sunken Reach hold water by definition
+#: (marsh and a drowned shelf), and the cordillera and spire fields are *natural* relief
+#: where a glacial tarn is exactly what one would expect - those keep their lakes.
+DRY_KINDS = ("caldera", "dunes", "quarry", "terraces", "coast")
+
 
 @dataclass
 class LandformResult:
@@ -38,6 +49,9 @@ class LandformResult:
     lava: np.ndarray                # (h, w) bool - fill with lava
     bare: np.ndarray                # (h, w) float 0..1 - "no decoration" weight
     basin: np.ndarray               # (h, w) bool - crater interior, never flooded
+    #: (h, w) bool - every cell the water system must leave alone: the crater interior plus
+    #: each closed-basin landform (see DRY_KINDS).  Fed to the water build as ``no_water``.
+    dry: np.ndarray
     diagnostics: Dict[str, float]
 
 
@@ -360,6 +374,16 @@ def apply_ashenfall(
                 pin = np.clip(1.0 - d / pin_r, 0.0, 1.0) ** 2.0
                 dem = dem * (1.0 - pin) + lm.y * pin
 
+    # ---- 2b. no-ponding mask ------------------------------------------------------------
+    # The crater interior is never flooded, and neither is any closed-basin landform: a
+    # stepped quarry, a dune field and a caldera rim all enclose pockets that `fill_lakes`
+    # would otherwise turn into ponds.  The water system already honours this mask for the
+    # caldera, so widening it costs nothing and keeps the specification's landforms dry.
+    dry = np.array(basin, dtype=bool)
+    for idx, lm in enumerate(landmarks):
+        if lm.kind in DRY_KINDS:
+            dry |= ids == idx
+
     # ---- 3. clamp to the elevation table -----------------------------------------------
     dem = np.clip(dem, ELEVATIONS["abyss_floor"], ELEVATIONS["spine_high"] + 4.0)
     counts = {lm.key: int(np.count_nonzero(ids == i)) for i, lm in enumerate(landmarks)}
@@ -368,5 +392,63 @@ def apply_ashenfall(
     diag["lava_cells"] = float(np.count_nonzero(lava))
     for key, value in counts.items():
         diag[f"cells_{key}"] = float(value)
-    return LandformResult(dem=dem, ids=ids, lava=lava, bare=bare, basin=basin,
+    diag["dry_cells"] = float(np.count_nonzero(dry))
+    return LandformResult(dem=dem, ids=ids, lava=lava, bare=bare, basin=basin, dry=dry,
                           diagnostics=diag)
+
+
+def repin_landmark_centres(
+    dem: np.ndarray,
+    X: np.ndarray,
+    Z: np.ndarray,
+    *,
+    water_mask: Optional[np.ndarray] = None,
+    water_level: Optional[np.ndarray] = None,
+    landmarks: Sequence[Landmark] = LANDMARKS,
+    radius: float = 220.0,
+    strength: float = 1.0,      # land exactly on the specified elevation at the centre
+    max_delta: float = 6.0,
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """Pull the finished surface back onto each landmark's specified centre elevation.
+
+    ``apply_ashenfall`` pins every centre while the landform is being stamped, but erosion
+    and hydrology run afterwards and both move the ground - a river crossing the Gilded
+    Dunes cuts two or three blocks out of it.  Since the specification lists an exact
+    elevation for each landmark, the pin is re-applied here to the *finished* heightfield:
+    a small, smooth, radius-limited nudge - never more than ``max_delta`` blocks - rather
+    than a flattening of the landform.
+
+    Water is carried with the ground it sits on.  A channel whose bed is lifted has its
+    surface lifted by the same amount, so the cross-section survives instead of leaving
+    the water stranded below its own bank.  Lakes and the sea are left alone entirely, and
+    the caldera is skipped because its centre is the Obsidian Throne, not a ground level.
+
+    Returns ``(dem, diagnostics)``.
+    """
+    dem = np.asarray(dem, dtype=np.float64).copy()
+    stats: Dict[str, float] = {}
+    wm = None if water_mask is None else np.asarray(water_mask)
+    wl = None if water_level is None else np.asarray(water_level)
+
+    for lm in landmarks:
+        if lm.kind == "caldera":
+            continue
+        d = _radial(X, Z, lm.x, lm.z)
+        w = np.clip(1.0 - d / float(radius), 0.0, 1.0) ** 2.0
+        if not bool((w > 0).any()):
+            continue
+        delta = np.clip(float(lm.y) - dem, -float(max_delta), float(max_delta)) * w * strength
+        if wm is not None:
+            # never disturb a lake or the sea; a river keeps its cross-section
+            delta = np.where((wm == 0) | (wm == 1), delta, 0.0)
+        if not bool((delta != 0.0).any()):
+            continue
+        dem = dem + delta
+        if wl is not None and wm is not None:
+            river = (wm == 1) & (delta != 0.0)
+            if bool(river.any()):
+                wl[river] = wl[river] + delta[river]
+        stats[f"repin_{lm.key}"] = float(np.abs(delta).max())
+
+    stats["repin_max"] = float(max(stats.values())) if stats else 0.0
+    return dem, stats

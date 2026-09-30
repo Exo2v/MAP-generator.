@@ -71,6 +71,21 @@ A full-resolution build (cell size 4 -> 4,000,000 simulation cells, 250,000 chun
 roughly ten minutes to generate and forty to export on two cores; `export.resume` is on,
 so an interrupted export continues from the chunks already written.
 
+Two details of the build are worth knowing, because both are places where the specification
+and a naive terrain generator disagree:
+
+* **The shaped landforms are kept dry.** A quarry bench, a dune swale and a caldera rim all
+  enclose closed sub-basins, and a depression filler would flood every one of them - the
+  first build filled 39% of the caldera, 25% of the Cogwork March and 15% of the Gilded
+  Dunes with lakes. The water system therefore takes a `no_lake` mask for those regions:
+  no standing water, but rivers still cross them (a stronger `no_water` mask would take the
+  rivers with it, which is only right for the lava basin).
+* **The landmark centres are re-pinned after hydrology.** The spec lists an exact elevation
+  for each of the nine centres; erosion and river carving move the ground a few blocks, so
+  the pin is re-applied to the finished surface - radius-limited and capped at 6 blocks -
+  which lands all eight ground-level centres within 0.25 blocks of the specification. The
+  caldera is exempt: its centre is the Obsidian Throne, at the spec's Y = 92.
+
 ---
 
 ## Quick start

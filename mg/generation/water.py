@@ -101,12 +101,19 @@ class WaterSystem:
 
     # ----------------------------------------------------------------------------------
     def build(self, dem: np.ndarray, climate, progress=None,
-              no_water: Optional[np.ndarray] = None) -> WaterResult:
+              no_water: Optional[np.ndarray] = None,
+              no_lake: Optional[np.ndarray] = None) -> WaterResult:
         """Build the river/lake/ocean system.
 
         ``no_water`` is an optional boolean mask of cells that must stay dry whatever the
         heightfield says - the Ashenfall caldera basin is below sea level but is filled
         with lava, so the surrounding sea must not pour into it.
+
+        ``no_lake`` is weaker: those cells may not *pond*, but a river is still allowed to
+        run through them.  A shaped landform - a stepped quarry, a dune field, a caldera
+        rim - is full of closed sub-basins that the depression filler would turn into
+        ponds, yet the specification's rivers plainly cross those regions.  Suppressing
+        only the standing water keeps both true.
         """
         c = self.cfg
         region = self.region
@@ -116,6 +123,14 @@ class WaterSystem:
             no_water = np.asarray(no_water, dtype=bool)
             if no_water.shape != dem.shape:
                 no_water = np.zeros(dem.shape, dtype=bool)
+        if no_lake is not None:
+            no_lake = np.asarray(no_lake, dtype=bool)
+            if no_lake.shape != dem.shape:
+                no_lake = np.zeros(dem.shape, dtype=bool)
+        #: cells that may not hold standing water, for either reason
+        no_pond = no_lake
+        if no_water is not None:
+            no_pond = no_water if no_pond is None else (no_pond | no_water)
         dem = np.asarray(dem, dtype=np.float64).copy()
 
         def tick(f, label):
@@ -141,12 +156,28 @@ class WaterSystem:
         )
         lakes.sort(key=lambda l: -l.volume)
         lakes = lakes[: int(c["max_lakes"])]
+        if no_pond is not None:
+            # Reconcile the lakes with the no-pond regions.  This has to happen *in the
+            # list*, because step 7 stamps ``water_mask`` by walking this list rather than
+            # by reading ``lake_mask``.  A lake that mostly lies inside such a region is
+            # not a lake that belongs there and is dropped; one that merely laps over the
+            # border keeps its valid part and has the overlap trimmed away.
+            kept = []
+            for lk in lakes:
+                inside = no_pond[lk.cells[:, 0], lk.cells[:, 1]]
+                if inside.size and float(inside.mean()) >= 0.5:
+                    continue
+                if inside.any():
+                    lk.cells = lk.cells[~inside]
+                if len(lk.cells):
+                    kept.append(lk)
+            lakes = kept
         keep = np.zeros_like(lake_mask)
         for lk in lakes:
             keep[lk.cells[:, 0], lk.cells[:, 1]] = True
         lake_mask = keep
-        if no_water is not None:
-            lake_mask = lake_mask & ~no_water
+        if no_pond is not None:
+            lake_mask = lake_mask & ~no_pond
         ocean = ocean_mask(dem, sea, exclude=no_water) if no_water is not None \
             else ocean_mask(dem, sea)
 
@@ -364,6 +395,26 @@ class WaterSystem:
         # have something continuous to read.
         dry = (water_mask == 0)
         flow[dry] = 0.0
+
+        # ---- 9. the no-pond invariant, enforced last ---------------------------------
+        # Enforcing it here rather than only where the lakes are first enumerated is what
+        # makes it airtight: the river shaper appends oxbow lakes of its own afterwards,
+        # and those would otherwise drop ponds back inside a quarry or a dune field.
+        if no_pond is not None and bool(no_pond.any()):
+            standing = (water_mask == 2) & no_pond
+            if bool(standing.any()):
+                water_mask[standing] = 0
+                water_level[standing] = DRY
+            kept = []
+            for lk in lakes:
+                inside = no_pond[lk.cells[:, 0], lk.cells[:, 1]]
+                if inside.size and float(inside.mean()) >= 0.5:
+                    continue
+                if bool(inside.any()):
+                    lk.cells = lk.cells[~inside]
+                if len(lk.cells):
+                    kept.append(lk)
+            lakes = kept
 
         tier_ids = classify_tiers(accum, threshold=float(np.median(np.asarray(threshold_map))))
         diag = {

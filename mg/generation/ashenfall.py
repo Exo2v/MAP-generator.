@@ -122,7 +122,8 @@ class AshenfallTerrain:
     ids: np.ndarray
     lava: np.ndarray
     bare: np.ndarray
-    dry: np.ndarray                 # caldera interior: never flooded
+    dry: np.ndarray                 # caldera interior + lava: never flooded at all
+    no_lake: np.ndarray             # shaped landforms that may not pond (rivers still cross)
     diagnostics: Dict[str, float] = field(default_factory=dict)
 
 
@@ -245,7 +246,10 @@ class AshenfallBuilder:
             ids=shaped.ids,
             lava=shaped.lava,
             bare=shaped.bare,
+            # the crater and the lava sheets are never wet at all; the closed-basin
+            # landforms merely may not pond, so a river can still run through them
             dry=shaped.basin | shaped.lava,
+            no_lake=shaped.dry,
             diagnostics=diag,
         )
 

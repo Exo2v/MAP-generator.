@@ -207,7 +207,13 @@ def export_world(
                 min_y=min_y, max_y=max_y, chunk_status=chunk_status,
             )
             path = _region_path(region_dir, writer)
-            if key in flushed:  # a previous batch already wrote part of this region
+            # Adopt whatever is already on disk before this writer can overwrite it.  Two
+            # cases need it: a previous batch inside this run (``flushed``), and - when
+            # resuming - chunks skipped at the start of this run, which are sitting in the
+            # file that this writer is about to rewrite.  Without the second case the
+            # writer would truncate the file down to only the chunks it happened to
+            # regenerate, destroying the very work the resume was meant to preserve.
+            if key in flushed or (resume and os.path.isfile(path)):
                 writer.adopt_existing(path)
             writers[key] = writer
         return writers[key]

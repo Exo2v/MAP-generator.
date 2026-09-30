@@ -87,6 +87,7 @@ def run_pipeline(
     t0 = time.time()
     engine = str((cfg.terrain or {}).get("engine", "generic")).lower()
     no_water = None
+    no_lake = None
     if engine == "ashenfall":
         from .generation.ashenfall import AshenfallBuilder
 
@@ -107,6 +108,7 @@ def run_pipeline(
         }
         # the caldera basin is a lava basin: water must not flood it
         no_water = ashen.dry
+        no_lake = ashen.no_lake
         masks["ashenfall_basin"] = ashen.dry.astype(np.uint8)
         extra_terrain = {"ashenfall": ashen.diagnostics}
     else:
@@ -159,8 +161,20 @@ def run_pipeline(
     water = WaterSystem(cfg.to_dict(), region, seed).build(
         heights, climate, progress=lambda f, l: report(0.5 + 0.2 * f, l),
         no_water=no_water,
+        no_lake=no_lake,
     )
     heights = water.dem
+    if engine == "ashenfall":
+        # The specification lists an exact elevation for every landmark centre, and erosion
+        # and hydrology have just moved them by a block or three.  Re-pin the finished
+        # surface (see landform.repin_landmark_centres) before anything downstream reads it.
+        from .generation.landform import repin_landmark_centres
+
+        heights, repin_stats = repin_landmark_centres(
+            heights, X, Y, water_mask=water.water_mask, water_level=water.water_level,
+        )
+        water.dem = heights
+        water.diagnostics.update(repin_stats)
     timer.record("water", time.time() - t0, water.diagnostics)
     report(0.7, "water")
     check()

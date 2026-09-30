@@ -248,6 +248,83 @@ class TestChunkExport(unittest.TestCase):
                                   [(i % 8, i // 8) for i in range(40)]})
 
 
+class TestResumeExport(unittest.TestCase):
+    """The exporter must be able to pick up an interrupted world without losing chunks.
+
+    This is the one that matters for the Ashenfall build: a quarter of a million chunks
+    takes tens of minutes, so an interruption is normal and resuming has to be safe.  The
+    trap is that a resumed run skips chunks it has *not* regenerated, and the region writer
+    for that file starts empty - if it does not adopt what is on disk it will rewrite the
+    file down to only the chunks it did regenerate, silently destroying the rest.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cfg = default_config()
+        # 256 x 256 blocks at cell 16 -> 16 x 16 chunks, all inside one region file
+        cfg.region = RegionInfo(blocks_x=256, blocks_z=256, cell_size=16)
+        cfg.seed = 4242
+        cfg.name = "Resume Test"
+        cls.cfg = cfg
+        cls.result = run_pipeline(cfg)
+        cls.tmp = tempfile.mkdtemp(prefix="mapgen-resume-")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _region_path(self, world_dir):
+        region_dir = os.path.join(world_dir, "region")
+        files = [f for f in os.listdir(region_dir) if f.endswith(".mca")]
+        self.assertEqual(len(files), 1, "expected everything in one region file")
+        return os.path.join(region_dir, files[0])
+
+    @staticmethod
+    def _occupied(path):
+        with open(path, "rb") as fh:
+            header = fh.read(4096)
+        return {i for i in range(1024)
+                if header[i * 4: i * 4 + 3] != b"\x00\x00\x00"}
+
+    @staticmethod
+    def _clear_entries(path, indices):
+        """Zero the location entries, i.e. pretend those chunks were never written."""
+        with open(path, "rb") as fh:
+            data = bytearray(fh.read())
+        for i in indices:
+            data[i * 4: i * 4 + 4] = b"\x00\x00\x00\x00"
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+    def test_resume_keeps_every_chunk(self):
+        cfg = type(self.cfg).from_dict(self.cfg.to_dict())
+        cfg.export["resume"] = True
+        cfg.export["world_name"] = "Resume Test"
+        cfg.export["generate_png_maps"] = False
+        cfg.export["write_bundle"] = False
+        cfg.export["write_level_dat"] = False
+
+        first = export_world(self.result.terrain, cfg.to_dict(), self.tmp, seed=cfg.seed)
+        path = self._region_path(first.world_dir)
+        written = self._occupied(path)
+        self.assertEqual(len(written), 256, "the first export wrote all 256 chunks")
+
+        # Simulate an interruption: the last-written chunks are missing, the rest are on
+        # disk.  A resumed run therefore skips most chunks and regenerates a few.
+        missing = sorted(written)[-56:]
+        self._clear_entries(path, missing)
+        self.assertEqual(len(self._occupied(path)), 200)
+
+        second = export_world(self.result.terrain, cfg.to_dict(), self.tmp, seed=cfg.seed)
+        path = self._region_path(second.world_dir)
+        after = self._occupied(path)
+        self.assertEqual(
+            after, written,
+            "resuming must restore the missing chunks without discarding the chunks it "
+            "skipped - otherwise the export can never finish",
+        )
+
+
 class TestWorldExport(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
