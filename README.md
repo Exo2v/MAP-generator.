@@ -48,6 +48,9 @@ python generate_ashfall.py --out both --cell 4               # both, one pass
 | `ashenfall_worldpainter_setup.js` | JSR-223 script that reconstructs the world in WorldPainter |
 | `<dir>/minecraft/Ashenfall/` | a real Java 1.21.1 save: `level.dat` + Anvil region files |
 
+A generated build of all of the above is checked in at [`assets/ashenfall/`](assets/ashenfall/), so the map's build layers can be taken straight
+into WorldPainter without running anything.
+
 The nine cardinal landmarks sit at their specified coordinates and elevations - The
 Forgotten Coast (spawn) `(0, 68, 2500)`, the Cogwork March `(-2100, 0)`, the Ashen Caldera
 `(0, 0)` with its 146-block rim and 92-block Obsidian Throne, the Solitary Glacial Spine

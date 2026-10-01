@@ -1,0 +1,51 @@
+{
+  "canvas": {
+    "width": 8000,
+    "depth": 8000,
+    "min_y": -64,
+    "max_y": 320,
+    "sea_level": 62,
+    "resolution": 2048
+  },
+  "normalisation": "uint16 = round((Y + 64) / 384 * 65535)",
+  "elevations": {
+    "bedrock_floor": -64.0,
+    "abyss_floor": -32.0,
+    "trench_top": 10.0,
+    "caldera_floor": 40.0,
+    "caldera_throne": 92.0,
+    "shelf_top": 56.0,
+    "sea_level": 62.0,
+    "coast_low": 68.0,
+    "coast_high": 74.0,
+    "dunes_low": 82.0,
+    "dunes_high": 96.0,
+    "quarry_low": 85.0,
+    "quarry_high": 110.0,
+    "caldera_rim": 146.0,
+    "taiga_low": 150.0,
+    "taiga_high": 190.0,
+    "spine_low": 220.0,
+    "spine_high": 279.2,
+    "treeline": 225.0,
+    "ceiling": 320.0
+  },
+  "surface_rule": {
+    "0-25deg": "grass_block / deep loam, 100 % population",
+    "25-35deg": "coarse_dirt / podzol, 40 % population",
+    "35-45deg": "cobblestone / scree / gravel, 5 % population",
+    ">45deg": "granite / basalt bedrock, 0 % population",
+    ">225": "snow_block / packed_ice / calcite, treeline",
+    "caldera": "blackstone / basalt / magma_block / obsidian, barren"
+  },
+  "masks": {
+    "populate": "ASHFALL_POPULATE_MASK.png",
+    "scree": "ASHFALL_SCREE_MASK.png",
+    "frost": "ASHFALL_FROST_MASK.png"
+  },
+  "worldpainter": {
+    "script": "ashenfall_worldpainter_setup.js",
+    "populate_layer": "Populate",
+    "frost_layer": "Frost"
+  }
+}
