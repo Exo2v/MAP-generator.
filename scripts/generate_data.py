@@ -114,21 +114,22 @@ def main(vanilla):
     # deliberately NOT copied: referencing vanilla's lets a cave overhaul apply here too.)
     write("worldgen/density_function/base_3d_noise.json", base_3d_noise)
 
-    # sloped_cheese: vanilla's 4 * quarter_negative(depth * factor) + 3D noise, with a constant factor and the
-    # 3D noise switched off by the model where a landmark's elevation is pinned (rough3d = 0).
+    # sloped_cheese: 4 * FACTOR * depth + 3D noise, with the 3D noise switched off by the model where a landmark's
+    # elevation is pinned (rough3d = 0).
+    #
+    # Vanilla bends this line at the surface - 4 * quarter_negative(depth * factor) is four times flatter above the
+    # ground than below it - so that noise cannot raise floating blobs. The bend costs exactness here: the engine
+    # evaluates the density only at the corners of 4 x 4 x 8-block cells and interpolates linearly, and a linear
+    # interpolation across a 4:1 bend crosses zero too high, by up to 24 f (1 - f) / (1 + 3 f) blocks, 2.6 at most.
+    # The in-engine test measured exactly that: the specified 68 / 85 / 220 / 140 / 75 came out as 70 / 87 / 222 /
+    # 142 / 78. A straight line is interpolated exactly, so the surface stays where the specification puts it
+    # (above the ground the line is steeper than vanilla's, so noise now lifts the surface by less, not more).
     sloped_cheese = {
         "type": "minecraft:add",
         "argument1": {
             "type": "minecraft:mul",
-            "argument1": 4.0,
-            "argument2": {
-                "type": "minecraft:quarter_negative",
-                "argument": {
-                    "type": "minecraft:mul",
-                    "argument1": f"{MOD}:depth",
-                    "argument2": FACTOR,
-                },
-            },
+            "argument1": 4.0 * FACTOR,
+            "argument2": f"{MOD}:depth",
         },
         "argument2": {
             "type": "minecraft:mul",

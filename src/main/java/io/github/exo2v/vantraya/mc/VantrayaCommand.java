@@ -28,7 +28,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
@@ -175,7 +174,7 @@ public final class VantrayaCommand {
         SpecVerifier.Probe probe = new SpecVerifier.Probe() {
             @Override
             public int groundHeight(int x, int z) {
-                return gen.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, level, rs) - 1;
+                return gen.terrainTopY(x, z, level, rs); // looks through cave mouths
             }
 
             @Override

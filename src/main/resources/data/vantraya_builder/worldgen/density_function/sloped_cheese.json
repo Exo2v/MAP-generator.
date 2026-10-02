@@ -2,15 +2,8 @@
   "type": "minecraft:add",
   "argument1": {
     "type": "minecraft:mul",
-    "argument1": 4.0,
-    "argument2": {
-      "type": "minecraft:quarter_negative",
-      "argument": {
-        "type": "minecraft:mul",
-        "argument1": "vantraya_builder:depth",
-        "argument2": 3.0
-      }
-    }
+    "argument1": 12.0,
+    "argument2": "vantraya_builder:depth"
   },
   "argument2": {
     "type": "minecraft:mul",

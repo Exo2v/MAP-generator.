@@ -187,7 +187,7 @@ class InEngineWorldgenTest {
         return new SpecVerifier.Probe() {
             @Override
             public int groundHeight(int x, int z) {
-                return gen.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, LEVEL, rs) - 1;
+                return gen.terrainTopY(x, z, LEVEL, rs);
             }
 
             @Override
@@ -217,6 +217,35 @@ class InEngineWorldgenTest {
     /** The Y of the top solid block: {@code ChunkAccess.getHeight} already returns that (the heightmap's first free Y, minus one). */
     private static int ground(ProtoChunk chunk, int x, int z) {
         return chunk.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, x & 15, z & 15);
+    }
+
+    /**
+     * The terrain's top Y near a column of the chunk: the highest top block among the column and the columns three
+     * blocks around it that lie inside the chunk. Cave mouths only remove ground, so this sees through one that
+     * happens to open exactly on the column.
+     */
+    private static int groundNear(ProtoChunk chunk, int x, int z) {
+        int best = ground(chunk, x, z);
+        for (int[] d : new int[][] {{3, 0}, {-3, 0}, {0, 3}, {0, -3}, {2, 2}, {2, -2}, {-2, 2}, {-2, -2}}) {
+            int lx = (x & 15) + d[0];
+            int lz = (z & 15) + d[1];
+            if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) {
+                best = Math.max(best, ground(chunk, x + d[0], z + d[1]));
+            }
+        }
+        return best;
+    }
+
+    /** Water lying open above the top solid block of a column: the sea or a lake on the ground. Not aquifers underground. */
+    private static int openWater(ProtoChunk chunk, int x, int z) {
+        int n = 0;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = ground(chunk, x, z) + 1; y < MIN_Y + HEIGHT; y++) {
+            if (chunk.getBlockState(pos.set(x, y, z)).is(Blocks.WATER)) {
+                n++;
+            }
+        }
+        return n;
     }
 
     private static int count(ProtoChunk chunk, Predicate<BlockState> what) {
@@ -395,14 +424,15 @@ class InEngineWorldgenTest {
             int x = (int) Math.floor(lm.x());
             int z = (int) Math.floor(lm.z());
             ProtoChunk chunk = fill(gen, rs, biomes, x >> 4, z >> 4);
-            int ground = ground(chunk, x, z);
+            int centre = ground(chunk, x, z);
             int viaBase = gen.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, LEVEL, rs) - 1;
+            int ground = groundNear(chunk, x, z); // the terrain, seen through a cave mouth opening on the pin
             double want = lm.kind() == Spec.Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y();
-            if (ground != viaBase) {
-                problems.add(lm.name() + ": chunk ground " + ground + " but getBaseHeight says " + viaBase);
+            if (centre != viaBase) {
+                problems.add(lm.name() + ": the chunk's centre column ends at " + centre + " but getBaseHeight says " + viaBase);
             }
             if (Math.abs(ground - want) > SpecVerifier.CENTRE_TOLERANCE) {
-                problems.add(lm.name() + ": ground Y " + ground + ", specified " + want);
+                problems.add(lm.name() + ": ground Y " + ground + " (centre column " + centre + "), specified " + want);
             }
             if (chunk.getBlockState(new BlockPos(x, MIN_Y, z)).isAir()) {
                 problems.add(lm.name() + ": no rock at the bottom of the world");
@@ -430,28 +460,40 @@ class InEngineWorldgenTest {
         // the same noise settings without the Vantraya post-passes: the crater floor (Y~40) is under the sea there
         NoiseBasedChunkGenerator plain = new NoiseBasedChunkGenerator(gen.getBiomeSource(), gen.generatorSettings());
 
-        int plainWater = 0;
-        int dryWater = 0;
+        int maskColumns = 0;
+        int plainOpenWater = 0;
+        int dryOpenWater = 0;
         int lavaColumns = 0;
-        int lava = 0;
-        for (int cx = 8; cx <= 24; cx += 4) { // x = 128..400 on the crater floor, z = 0..15
-            ProtoChunk with = fill(gen, rs, biomes, cx, 0);
-            ProtoChunk without = fill(plain, rs, biomes, cx, 0);
-            plainWater += count(without, s -> s.is(Blocks.WATER));
-            dryWater += count(with, s -> s.is(Blocks.WATER));
-            for (int dz = 0; dz < 16; dz++) {
-                for (int dx = 0; dx < 16; dx++) {
-                    if (model.sample(cx * 16 + dx + 0.5, dz + 0.5).lava()) {
-                        lavaColumns++;
+        int lavaPoured = 0;
+        for (int cz : new int[] {0, -6}) {
+            for (int cx = 0; cx <= 24; cx += 4) { // the crater's east radius, x = 0..399
+                ProtoChunk with = fill(gen, rs, biomes, cx, cz);
+                ProtoChunk without = fill(plain, rs, biomes, cx, cz);
+                CalderaFluids.pourLava(with, model);
+                for (int dz = 0; dz < 16; dz++) {
+                    for (int dx = 0; dx < 16; dx++) {
+                        int x = cx * 16 + dx;
+                        int z = cz * 16 + dz;
+                        VantrayaModel.Fields f = model.sample(x + 0.5, z + 0.5);
+                        if (f.noWater()) {
+                            maskColumns++;
+                            plainOpenWater += openWater(without, x, z);
+                            dryOpenWater += openWater(with, x, z);
+                        }
+                        if (f.lava()) {
+                            lavaColumns++;
+                            if (with.getBlockState(new BlockPos(x, ground(with, x, z) + 1, z)).is(Blocks.LAVA)) {
+                                lavaPoured++;
+                            }
+                        }
                     }
                 }
             }
-            CalderaFluids.pourLava(with, model);
-            lava += count(with, s -> s.is(Blocks.LAVA));
         }
-        assertTrue(plainWater > 0, "control: without the drain the crater holds sea water");
-        assertEquals(0, dryWater, "the drained crater holds no open water");
-        assertEquals(lavaColumns > 0, lava > 0, "lava is poured exactly where the model's lava mask says (" + lavaColumns + " columns, " + lava + " blocks)");
+        assertTrue(maskColumns > 0, "the sampled chunks contain columns of the caldera's no-water mask");
+        assertTrue(plainOpenWater > 0, "control: without the drain the crater holds open sea water (" + maskColumns + " columns)");
+        assertEquals(0, dryOpenWater, "the drained crater holds no open water (undrained: " + plainOpenWater + " blocks)");
+        assertEquals(lavaColumns, lavaPoured, "lava lies on the ground of every column the model's lava mask names");
     }
 
     @Test
@@ -491,7 +533,7 @@ class InEngineWorldgenTest {
         Registry<Biome> biomes = server.registryAccess().registryOrThrow(Registries.BIOME);
         RandomState rs = randomState(server, gen, 777L);
         ProtoChunk chunk = fill(gen, rs, biomes, 3750 >> 4, 0);
-        int g = ground(chunk, 3750, 0);
+        int g = groundNear(chunk, 3750, 0);
         assertTrue(g >= Spec.ABYSS_FLOOR - 2 && g <= Spec.TRENCH_TOP + 2, "abyss floor Y " + g);
         assertTrue(chunk.getBlockState(new BlockPos(3750, 50, 0)).is(Blocks.WATER), "water above the abyss floor");
     }

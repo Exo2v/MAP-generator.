@@ -12,10 +12,12 @@ import io.github.exo2v.vantraya.core.VantrayaModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -65,6 +67,26 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
         VantrayaModel m = WorldSeeds.modelFor(probe::getValue);
         this.cached = new Cached(randomState, m);
         return m;
+    }
+
+    /** The columns {@link #terrainTopY} reads: the one asked for and a ring of eight about three blocks around it. */
+    private static final int[][] LOOK_AROUND = {
+            {0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}, {2, 2}, {2, -2}, {-2, 2}, {-2, -2}};
+
+    /**
+     * The Y of the top solid block of the <em>terrain</em> at (x, z): the highest top block among the column and a
+     * ring of eight columns around it. Caves and noodle tunnels only ever remove ground, so a tunnel that happens to
+     * break the surface exactly at the column asked for lowers that column's top block by several blocks while the
+     * ground around it is intact; the ring still sees the surface the height field asked for. This is what
+     * {@code /vantraya verify} and the in-engine tests ask - does the terrain match the specification - rather than
+     * whether a cave happens to open on a pin.
+     */
+    public int terrainTopY(int x, int z, LevelHeightAccessor level, RandomState randomState) {
+        int top = Integer.MIN_VALUE;
+        for (int[] d : LOOK_AROUND) {
+            top = Math.max(top, getBaseHeight(x + d[0], z + d[1], Heightmap.Types.OCEAN_FLOOR_WG, level, randomState) - 1);
+        }
+        return top;
     }
 
     @Override
