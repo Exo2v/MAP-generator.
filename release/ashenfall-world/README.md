@@ -53,10 +53,17 @@ Install them **before** first loading the world, then walk away from spawn for a
 so the chunks you have already visited get decorated. Do not combine with Terralith or
 Biomes O' Plenty (Still Life refuses to run with them).
 
-If you would rather play completely vanilla, that works too — the exported `level.dat`
-has `generate_features` enabled, so the game's own decorators fill in vanilla-style
-features when the chunks first load. To keep the world completely bare instead, set
-`Data.WorldGenSettings.generate_features` to `0` in `level.dat` before the first load.
+The save ships with `generate_features = 0` in `level.dat`, so the game's own decorators
+are **off** and the chunks are decorated by the mods only — no vanilla trees, no vanilla
+structures. If you would rather have vanilla decoration, flip it back before adding the
+mods:
+
+```bash
+python3 -m mg.tools.set_world_decoration .minecraft/saves/Ashenfall --vanilla
+```
+
+The same tool flips it the other way (`--mods`) if you have an older save, and it refuses
+to write anything it cannot read back.
 
 ## What was generated
 

@@ -34,6 +34,7 @@ import glob
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -171,9 +172,11 @@ def commit_and_push(paths: Iterable[str], message: str, *, attempts: int = 3) ->
     for attempt in range(1, attempts + 1):
         try:
             git("add", *paths)
-            if git("diff", "--cached", "--quiet", check=False).returncode == 0:
-                return True                      # nothing new to commit
-            git("commit", "-q", "-m", message)
+            if git("diff", "--cached", "--quiet", check=False).returncode != 0:
+                git("commit", "-q", "-m", message)
+            # Always push, even when there was nothing to commit: after a failed push the
+            # earlier attempt's commit is already in place, and "nothing to commit" must
+            # not be reported as "published".
             git("push", "-q", "origin", "HEAD")
             return True
         except subprocess.CalledProcessError as exc:  # pragma: no cover - network/git race
@@ -339,6 +342,38 @@ def _write_sums(out_dir: str) -> bool:
     return True
 
 
+def run_restore(args) -> int:
+    """Extract published shards back into the save folder.
+
+    This is what makes a two-hour export survive losing the sandbox: after a reset the
+    region files are gone, but the shards that were pushed to the repository are not, so
+    they are unpacked again and the export resumes from the chunks they carry.
+    """
+    world = os.path.abspath(args.world)
+    out_dir = os.path.abspath(args.out)
+    os.makedirs(world, exist_ok=True)
+    shards = sorted(glob.glob(os.path.join(out_dir, "*.zip")))
+    if not shards:
+        print(f"nothing to restore: no shards in {out_dir}")
+        return 0
+    files = 0
+    for path in shards:
+        with zipfile.ZipFile(path) as z:
+            for name in z.namelist():
+                if name.endswith("/"):
+                    continue
+                target = os.path.join(world, name)
+                if os.path.exists(target):
+                    continue                     # never clobber newer local work
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with z.open(name) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                files += 1
+        print(f"  {os.path.basename(path)}  -> {world}")
+    print(f"restored {files} file(s) from {len(shards)} shard(s)")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pack_world_download.py",
                                  description="Split or stream-publish a save as ZIP shards.")
@@ -351,6 +386,9 @@ def main(argv=None) -> int:
     ap.add_argument("--version", default="", help="version tag used in the file names")
     ap.add_argument("--level", type=int, default=6, help="zip deflate level")
     ap.add_argument("--watch", action="store_true", help="follow a running export")
+    ap.add_argument("--restore", action="store_true",
+                    help="extract the shards in --out back into the save folder (used after "
+                         "an interrupted build, so the resumable export can continue)")
     ap.add_argument("--interval", type=float, default=60.0, help="--watch poll seconds")
     ap.add_argument("--min-raw-mb", type=float, default=200.0,
                     help="--watch: hold newly finished regions until this much raw data has "
@@ -363,6 +401,8 @@ def main(argv=None) -> int:
     ap.add_argument("--flush-extra", action="append", default=[],
                     help="--watch: extra files to add to every shard (repeatable)")
     args = ap.parse_args(argv)
+    if args.restore:
+        return run_restore(args)
     return run_watch(args) if args.watch else run_once(args)
 
 

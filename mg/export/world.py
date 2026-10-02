@@ -57,6 +57,7 @@ def _level_dat(
     game_type: int = 1,
     hardcore: bool = False,
     allow_commands: bool = True,
+    generate_features: bool = True,
 ) -> Tag:
     now = int(time.time() * 1000)
     version_tag = compound_of("Version", [
@@ -96,7 +97,9 @@ def _level_dat(
                                   String("keepInventory", "true")]),
         compound_of("WorldGenSettings", [
             Long("seed", int(seed)),
-            Byte("generate_features", 1),
+            # 1 = let the game's own decorators populate the chunks on first load,
+            # 0 = leave them alone so Lithosphere / Still Life do it (spec §5 method 1).
+            Byte("generate_features", 1 if generate_features else 0),
             Byte("bonus_chest", 0),
             compound_of("dimensions", [
                 compound_of("minecraft:overworld", [
@@ -227,6 +230,11 @@ def export_world(
     decorate_in_engine = str(export_cfg.get("decoration", "engine")).lower() != "mods"
     chunk_status = str(export_cfg.get("chunk_status")
                        or ("minecraft:full" if decorate_in_engine else "minecraft:features"))
+    # The level file has to agree with the chunk status: chunks left at an earlier
+    # generation stage plus generate_features = 1 would let vanilla decorate them on the
+    # first load, which is exactly what method 1 forbids.  With 0 the mods' own placed
+    # features run instead.  Override explicitly with export.generate_features.
+    generate_features = bool(export_cfg.get("generate_features", decorate_in_engine))
 
     # ---- resume ---------------------------------------------------------------------
     # A full 8,000 x 8,000 continent is a quarter of a million chunks and takes tens of
@@ -289,7 +297,7 @@ def export_world(
     spawn = _pick_spawn(terrain, export_cfg)
     if bool(export_cfg.get("write_level_dat", True)):
         level = _level_dat(name=world_name, seed=seed, spawn=spawn, data_version=data_version,
-                           version=version)
+                           version=version, generate_features=generate_features)
         with open(os.path.join(world_dir, "level.dat"), "wb") as fh:
             fh.write(_gzip(level, compression_level=6))
         with open(os.path.join(world_dir, "session.lock"), "wb") as fh:

@@ -406,6 +406,88 @@ class TestRegionFlushBatching(unittest.TestCase):
                          "chunks read back from disk must not be queued for a rewrite")
 
 
+class TestDecorationFlag(unittest.TestCase):
+    """The level file must agree with the chunk status.
+
+    Spec §5 method 1 leaves the chunks undecorated for the mods, so the save must say
+    ``generate_features = 0`` - with 1, vanilla would decorate the chunks on first load,
+    which is the one thing method 1 rules out.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cfg = default_config()
+        cfg.region = RegionInfo(blocks_x=128, blocks_z=128, cell_size=16)
+        cfg.seed = 31337
+        cfg.name = "Flag Test"
+        cls.cfg = cfg
+        cls.result = run_pipeline(cfg)
+        cls.tmp = tempfile.mkdtemp(prefix="mapgen-flag-")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _export(self, name, **export):
+        cfg = type(self.cfg).from_dict(self.cfg.to_dict())
+        cfg.export["world_name"] = name
+        cfg.export["generate_png_maps"] = False
+        cfg.export["write_bundle"] = False
+        cfg.export["worldpainter_bundle"] = False
+        cfg.export.update(export)
+        return export_world(self.result.terrain, cfg.to_dict(),
+                            os.path.join(self.tmp, name), seed=cfg.seed)
+
+    def test_mods_mode_writes_generate_features_off(self):
+        from mg.tools.set_world_decoration import read_flag
+
+        result = self._export("mods", decoration="mods")
+        self.assertEqual(read_flag(os.path.join(result.world_dir, "level.dat")), 0)
+
+    def test_engine_mode_writes_generate_features_on(self):
+        from mg.tools.set_world_decoration import read_flag
+
+        result = self._export("engine", decoration="engine")
+        self.assertEqual(read_flag(os.path.join(result.world_dir, "level.dat")), 1)
+
+    def test_explicit_override_wins(self):
+        from mg.tools.set_world_decoration import read_flag
+
+        result = self._export("override", decoration="engine", generate_features=False)
+        self.assertEqual(read_flag(os.path.join(result.world_dir, "level.dat")), 0)
+
+    def test_patch_tool_flips_the_flag_and_keeps_the_old_copy_in_step(self):
+        from mg.tools.set_world_decoration import main as patch_main, read_flag
+
+        result = self._export("patchme", decoration="engine")
+        world = result.world_dir
+        self.assertEqual(patch_main([world, "--mods"]), 0)
+        self.assertEqual(read_flag(os.path.join(world, "level.dat")), 0)
+        self.assertEqual(read_flag(os.path.join(world, "level.dat_old")), 0,
+                         "the launcher reads level.dat_old too")
+        self.assertFalse(os.path.exists(os.path.join(world, "level.dat.bak")),
+                         "a successful patch leaves no backup behind")
+
+    def test_dry_run_changes_nothing(self):
+        from mg.tools.set_world_decoration import main as patch_main, read_flag
+
+        result = self._export("dryrun", decoration="engine")
+        level = os.path.join(result.world_dir, "level.dat")
+        before = open(level, "rb").read()
+        self.assertEqual(patch_main([result.world_dir, "--mods", "--dry-run"]), 0)
+        self.assertEqual(open(level, "rb").read(), before)
+
+    def test_a_level_dat_without_the_key_is_refused(self):
+        from mg.export.nbt import Byte, Compound, Int, String, compound_of, write_nbt
+        from mg.tools.set_world_decoration import patch_level_dat, read_flag
+
+        path = os.path.join(self.tmp, "bare-level.dat")
+        with open(path, "wb") as fh:
+            fh.write(write_nbt(compound_of("", [compound_of("Data", [Int("n", 1)])])))
+        self.assertIsNone(read_flag(path))
+        self.assertFalse(patch_level_dat(path, 0))
+
+
 class TestWorldExport(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
