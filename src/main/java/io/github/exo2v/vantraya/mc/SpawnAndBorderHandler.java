@@ -43,6 +43,11 @@ public final class SpawnAndBorderHandler {
     /** Optional 8,000-block border, applied once to a world whose border has never been touched. */
     public static void onServerStarted(ServerStartedEvent event) {
         ServerLevel overworld = event.getServer().overworld();
+        if (overworld == null) {
+            // A server that never loaded any level (NeoForge's ephemeral test server, a data-only tool): nothing to
+            // border. An exception here would end the server thread, since this runs before its first tick.
+            return;
+        }
         if (!(overworld.getChunkSource().getGenerator() instanceof VantrayaChunkGenerator)
                 || !VantrayaConfig.enforceWorldBorder()) {
             return;

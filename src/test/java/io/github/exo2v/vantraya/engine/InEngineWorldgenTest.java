@@ -10,9 +10,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,6 +69,7 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.presets.WorldPreset;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import net.neoforged.testframework.junit.EphemeralTestServerProvider;
 
 /**
@@ -81,12 +88,64 @@ import net.neoforged.testframework.junit.EphemeralTestServerProvider;
  * ({@code buildSurface} needs a {@code WorldGenRegion}), feature decoration, spawning.
  */
 @ExtendWith(EphemeralTestServerProvider.class)
-@Timeout(value = 4, unit = TimeUnit.MINUTES) // the provider waits forever if the server thread dies while starting
+@Timeout(value = 4, unit = TimeUnit.MINUTES) // a safety net per test; start-up has its own, shorter deadline below
 class InEngineWorldgenTest {
 
     private static final int MIN_Y = -64;
     private static final int HEIGHT = 384;
     private static final LevelHeightAccessor LEVEL = LevelHeightAccessor.create(MIN_Y, HEIGHT);
+
+    // ---- starting the server -------------------------------------------------------------------------
+
+    private static final int START_DEADLINE_SECONDS = 150;
+
+    /**
+     * The provider marks the server as started when its thread completes a first tick, and polls for that
+     * forever: if anything throws while the server thread is starting - a mod's ServerStarting or ServerStarted
+     * listener, say - the thread ends, nothing is reported, and the test thread sleeps for good. So start it on a
+     * helper thread with a deadline, and say what became of the server thread when the deadline passes.
+     */
+    @BeforeAll
+    static void theEphemeralServerComesUp() throws Exception {
+        ExecutorService starter = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "vantraya-test-server-starter");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            Callable<MinecraftServer> start = EphemeralTestServerProvider::grabServer;
+            starter.submit(start).get(START_DEADLINE_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new AssertionError(describeStalledStart(), e);
+        } catch (ExecutionException e) {
+            throw new AssertionError("starting the ephemeral server threw " + e.getCause(), e.getCause());
+        } finally {
+            starter.shutdownNow();
+        }
+    }
+
+    private static String describeStalledStart() {
+        StringBuilder sb = new StringBuilder("the ephemeral server had not completed a tick after ")
+                .append(START_DEADLINE_SECONDS).append(" s.");
+        Thread server = null;
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.getName().equals("Server thread")) {
+                server = t;
+            }
+        }
+        if (server == null) {
+            sb.append(" There is no 'Server thread': it ended while starting. The log has the reason under")
+                    .append(" 'Encountered an unexpected exception' - usually a mod's listener for a server lifecycle event threw.");
+        } else {
+            sb.append(" 'Server thread' is ").append(server.getState()).append(", at:");
+            StackTraceElement[] frames = server.getStackTrace();
+            for (int i = 0; i < Math.min(frames.length, 25); i++) {
+                sb.append("\n    at ").append(frames[i]);
+            }
+        }
+        return sb.append("\nServerLifecycleHooks.getCurrentServer() is ")
+                .append(ServerLifecycleHooks.getCurrentServer() == null ? "null" : "set").toString();
+    }
 
     // ---- helpers ----------------------------------------------------------------------------------
 

@@ -107,19 +107,23 @@ jobs:
           if-no-files-found: ignore
 
       # When the build fails, put the reasons where they can be read without opening the full log: one annotation on
-      # the run with the compiler errors / failed tests.
+      # the run. GitHub keeps only the first 4096 characters of an annotation, so every section has its own budget
+      # and none can crowd out the others.
       - name: Explain a failed build
         if: failure()
         run: |
+          section() { echo "== $1 =="; head -c "$2"; echo; }
           {
+            grep -E -A5 ' FAILED$' build.log | cut -c1-170 | section "failed tests" 1200
+            grep -E -A7 'Encountered an unexpected exception|Exception in server tick loop|Failed to load vanilla datapack|Failed to start the minecraft server|Failed to initialize server|Registry loading errors' build.log | cut -c1-170 | section "the game's own errors" 1100
+            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)' build.log | cut -c1-170 | section "compiler / gradle" 500
             for f in /tmp/threads-*.txt; do
               [ -f "$f" ] || continue
-              echo "=== the test JVM was stuck; its threads ($(basename "$f")) ==="
-              awk '/^"/ { keep = ($0 ~ /Test worker|Server thread|^"main"|vantraya|ephemeral/) } keep' "$f" | head -90
+              {
+                awk '/^"/ { keep = ($0 ~ /^"Server thread"/) ? 20 : 0; n = 0 } keep > 0 && n < keep { print; n++ }' "$f"
+                awk '/^"/ { keep = ($0 ~ /^"Test worker"/) ? 5 : 0; n = 0 } keep > 0 && n < keep { print; n++ }' "$f"
+              } | cut -c1-170 | section "a test JVM was stuck: the server thread (absent = it had ended), then the test thread" 1000
             done
-            grep -E -A4 ' FAILED$' build.log || true
-            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:|FATAL|Failed to (load|start)|Encountered an unexpected exception' build.log || true
-            echo "=== last lines of the build log ==="
-            tail -n 25 build.log
-          } | head -170 | sed 's/%/%25/g; s/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
+            tail -n 10 build.log | cut -c1-170 | section "end of the build log" 400
+          } | tr -d '\r' | head -c 3950 | sed 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
           echo "::error title=Why the build failed::$(cat /tmp/why.txt)"
