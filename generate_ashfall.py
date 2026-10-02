@@ -54,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, default=20250929, help="world seed")
     ap.add_argument("--name", default="Ashenfall", help="world name")
     ap.add_argument("--config", default="", help="write the resolved mapgen.json here")
+    ap.add_argument("--compression", type=int, default=0,
+                    help="zlib level for the Minecraft region files (0 = keep the preset's "
+                         "value, 9 = smallest download; only used by --out anvil)")
+    ap.add_argument("--progress-log", type=float, default=0.0, metavar="SECONDS",
+                    help="append a timestamped progress line to stdout at most every SECONDS, "
+                         "which keeps a redirected build log readable")
     ap.add_argument("--quiet", action="store_true", help="no progress output")
     return ap
 
@@ -70,6 +76,8 @@ def main(argv=None) -> int:
         cfg.region.blocks_x = cfg.region.blocks_z = size
         cfg.region.x0 = cfg.region.z0 = -(size // 2)
     cfg.export["world_name"] = args.name
+    if args.compression:
+        cfg.export["compression"] = int(args.compression)
 
     blocks = cfg.region.blocks_x
     cells = cfg.region.cells_x
@@ -80,9 +88,16 @@ def main(argv=None) -> int:
     print(f"  output   {args.out} -> {os.path.abspath(args.dir)}")
 
     last = [0.0]
+    log_every = float(args.progress_log or 0.0)
 
     def progress(frac: float, label: str) -> None:
-        if args.quiet:
+        if args.quiet or log_every:
+            if log_every:
+                now = time.time()
+                if now - last[0] < log_every and frac < 1.0:
+                    return
+                last[0] = now
+                print(f"  {time.strftime('%H:%M:%S')}  {frac * 100:5.1f}%  {label}", flush=True)
             return
         now = time.time()
         if now - last[0] < 0.4 and frac < 1.0:
