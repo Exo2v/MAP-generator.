@@ -364,6 +364,10 @@ class RegionFileWriter:
         self.chunk_status = chunk_status
         self.chunks: Dict[int, bytes] = {}
         self.sizes: Dict[int, int] = {}
+        # How many of ``chunks`` are already on disk.  A region is flushed when the
+        # number of *unwritten* chunks reaches the batch size - counting the adopted
+        # ones again would rewrite the whole 1 MB file once per chunk.
+        self.written = 0
 
     def adopt_existing(self, path: str) -> int:
         """Pull the chunks already present in ``path`` into this writer.
@@ -395,6 +399,7 @@ class RegionFileWriter:
             self.chunks[index] = data[offset + 5 : offset + 4 + length]
             self.sizes[index] = len(self.chunks[index])
             adopted += 1
+        self.written = len(self.chunks)   # what we just read back is on disk already
         return adopted
 
     def add_chunk(self, cx: int, cz: int, chunk_blocks) -> None:
@@ -422,6 +427,11 @@ class RegionFileWriter:
     @property
     def chunk_count(self) -> int:
         return len(self.chunks)
+
+    @property
+    def pending(self) -> int:
+        """Chunks held in memory that are not in the file yet."""
+        return len(self.chunks) - self.written
 
     def write(self, path: str) -> str:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -452,4 +462,5 @@ class RegionFileWriter:
         with open(path, "wb") as fh:
             fh.write(bytes(header))
             fh.write(bytes(body))
+        self.written = len(self.chunks)
         return path

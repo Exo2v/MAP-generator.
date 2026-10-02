@@ -71,6 +71,17 @@ def unpack_bits(words, bits: int, count: int) -> np.ndarray:
     return out[:count]
 
 
+def _stub_chunk():
+    """A minimal ChunkBlocks-like object for writer-level tests."""
+    class _Stub:
+        blocks = np.full((384, 16, 16), 0, dtype=np.uint16)
+        blocks[:64] = 1
+        biomes = np.zeros((16, 16), dtype=np.uint8)
+        surface_y = np.full((16, 16), 63, dtype=np.int16)
+        water_y = np.full((16, 16), -1, dtype=np.int16)
+    return _Stub()
+
+
 class TestNbt(unittest.TestCase):
     def test_every_type_round_trips(self):
         root = compound_of("Root", [
@@ -323,6 +334,76 @@ class TestResumeExport(unittest.TestCase):
             "resuming must restore the missing chunks without discarding the chunks it "
             "skipped - otherwise the export can never finish",
         )
+
+
+class TestRegionFlushBatching(unittest.TestCase):
+    """A region file must be written in batches, not once per chunk.
+
+    The writer flushes when it holds ``chunk_batch`` chunks that are not on disk yet.
+    Counting the chunks it *adopted* from disk as pending as well would make every
+    later chunk rewrite the whole file - on an 8,000 x 8,000 continent that is 512
+    extra megabyte-sized writes per region and roughly doubles the export time.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cfg = default_config()
+        # 512 x 512 blocks at cell 16 -> 32 x 32 chunks: exactly one region file
+        cfg.region = RegionInfo(blocks_x=512, blocks_z=512, cell_size=16)
+        cfg.seed = 99
+        cfg.name = "Flush Test"
+        cfg.export["chunk_batch"] = 512
+        cfg.export["generate_png_maps"] = False
+        cfg.export["write_bundle"] = False
+        cfg.export["write_level_dat"] = False
+        cfg.export["worldpainter_bundle"] = False
+        cls.cfg = cfg
+        cls.result = run_pipeline(cfg)
+        cls.tmp = tempfile.mkdtemp(prefix="mapgen-flush-")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_one_region_is_written_twice(self):
+        from mg.export import anvil
+
+        calls = []
+        original = anvil.RegionFileWriter.write
+
+        def counting(self, path):
+            calls.append(len(self.chunks))
+            return original(self, path)
+
+        anvil.RegionFileWriter.write = counting
+        try:
+            export_world(self.result.terrain, self.cfg.to_dict(), self.tmp, seed=self.cfg.seed)
+        finally:
+            anvil.RegionFileWriter.write = original
+
+        self.assertEqual(len(calls), 2,
+                         f"1,024 chunks with a batch of 512 must flush twice, got {calls}")
+        self.assertEqual(sorted(calls), [512, 1024])
+
+    def test_pending_drops_to_zero_after_a_flush(self):
+        writer = RegionFileWriter(0, 0)
+        for i in range(600):
+            writer.chunks[i] = b"x"
+        self.assertEqual(writer.pending, 600)
+        writer.write(os.path.join(self.tmp, "r.0.0.mca"))
+        self.assertEqual(writer.pending, 0, "a flushed region has nothing pending")
+
+    def test_adopting_counts_as_written(self):
+        path = os.path.join(self.tmp, "r.1.1.mca")
+        first = RegionFileWriter(1, 1)
+        for i in range(8):
+            first.add_chunk(i, 0, _stub_chunk())
+        first.write(path)
+
+        second = RegionFileWriter(1, 1)
+        self.assertEqual(second.adopt_existing(path), 8)
+        self.assertEqual(second.pending, 0,
+                         "chunks read back from disk must not be queued for a rewrite")
 
 
 class TestWorldExport(unittest.TestCase):

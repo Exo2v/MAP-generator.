@@ -270,7 +270,9 @@ def export_world(
             if progress and (done % 8 == 0 or done == total_chunks):
                 progress(done / max(total_chunks, 1),
                          f"exporting chunk {done}/{total_chunks}")
-            if writer.chunk_count >= int(export_cfg.get("chunk_batch", 512)):
+            # Flush on *unwritten* chunks, not on the file's total: a resumed or
+            # already-flushed region would otherwise rewrite itself every chunk.
+            if writer.pending >= int(export_cfg.get("chunk_batch", 512)):
                 path = _region_path(region_dir, writer)
                 region_files.append(writer.write(path))
                 flushed.add((writer.rx, writer.rz))
