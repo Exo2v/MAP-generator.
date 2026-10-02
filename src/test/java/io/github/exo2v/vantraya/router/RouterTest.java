@@ -126,6 +126,46 @@ public class RouterTest {
         }
     }
 
+    /**
+     * Vanilla's cave entrances and noodle tunnels carve from the surface down; one entrance opened a 17-block pit in the
+     * pinned top of the Hermit's Spire (found by the in-engine run). With either forced to its strongest, a landmark
+     * centre must still stand at its specified elevation - and, as a control for each, ground away from every centre
+     * must be carved, or the test proves nothing.
+     */
+    @Test
+    public void caveEntrancesAndNoodlesCannotOpenTheSurfaceAtALandmarkCentre() {
+        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
+        JsonElement fd = router.get("final_density");
+        for (String function : new String[] {"minecraft:overworld/caves/entrances", "minecraft:overworld/caves/noodle"}) {
+            DensityInterpreter in = new DensityInterpreter(m);
+            in.override(function, -100.0);
+            for (Spec.Landmark lm : Spec.LANDMARKS) {
+                double want = lm.kind() == Spec.Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y();
+                assertEquals(function + ": " + lm.key() + " centre", want, topSolid(in, fd, lm.x(), lm.z()), 0.0);
+                for (double[] d : new double[][] {{40, 0}, {0, -40}, {-30, 30}}) {
+                    double x = lm.x() + d[0];
+                    double z = lm.z() + d[1];
+                    double ground = Math.floor(m.height(x, z) + 0.5);
+                    assertEquals(function + ": " + lm.key() + " at " + x + "," + z, ground, topSolid(in, fd, x, z), 1.0);
+                }
+            }
+            int land = 0;
+            int carved = 0;
+            for (int x = -3400; x <= 3400; x += 400) {
+                for (int z = -3400; z <= 3400; z += 400) {
+                    if (Spec.protection(x, z) == 0.0 && m.height(x, z) > Spec.SEA_LEVEL + 5) {
+                        land++;
+                        if (topSolid(in, fd, x, z) < Math.floor(m.height(x, z) + 0.5) - 10) {
+                            carved++;
+                        }
+                    }
+                }
+            }
+            assertTrue("control for " + function + ": " + land + " land columns away from the centres, " + carved + " carved",
+                    land > 30 && carved == land);
+        }
+    }
+
     @Test
     public void spineSummitsClearTheOldTerrainCeiling() {
         // vanilla fades terrain out between Y=240 and 256; the Glacial Spine is specified up to 279
@@ -247,7 +287,7 @@ public class RouterTest {
 
     @Test
     public void fieldFunctionJsonUsesTheKeysTheCodecReads() {
-        for (String ch : new String[] {"continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d"}) {
+        for (String ch : new String[] {"continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d", "protect"}) {
             JsonObject flat = DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/density_function/field/" + ch + ".json").getAsJsonObject();
             assertEquals("minecraft:flat_cache", flat.get("type").getAsString());
             JsonObject field = flat.getAsJsonObject("argument");

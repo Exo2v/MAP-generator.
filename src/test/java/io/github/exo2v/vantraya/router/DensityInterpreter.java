@@ -11,6 +11,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import io.github.exo2v.vantraya.core.Spec;
 import io.github.exo2v.vantraya.core.VantrayaModel;
 
 /**
@@ -36,6 +37,11 @@ final class DensityInterpreter {
         overrides.put("minecraft:overworld/caves/spaghetti_2d", 1.0);
         overrides.put("minecraft:overworld/caves/spaghetti_roughness_function", 0.0);
         overrides.put("minecraft:overworld/caves/pillars", -1.0);
+    }
+
+    /** Force a referenced density function to a constant (tests use it to ask for the strongest cave carving). */
+    void override(String id, double value) {
+        overrides.put(id, value);
     }
 
     static JsonElement parseResource(String path) {
@@ -164,6 +170,8 @@ final class DensityInterpreter {
                         return f.height();
                     case "rough3d":
                         return f.rough3d();
+                    case "protect":
+                        return Spec.protection(x, z);
                     default:
                         throw new IllegalArgumentException("unknown channel " + o);
                 }

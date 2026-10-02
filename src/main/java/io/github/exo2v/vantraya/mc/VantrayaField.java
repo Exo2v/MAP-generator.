@@ -6,6 +6,7 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import io.github.exo2v.vantraya.VantrayaBuilder;
+import io.github.exo2v.vantraya.core.Spec;
 import io.github.exo2v.vantraya.core.VantrayaModel;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -23,7 +24,8 @@ import net.minecraft.world.level.levelgen.synth.NormalNoise;
  * The noise router wires the channels the way vanilla wires its own terrain splines: {@code continents},
  * {@code erosion}, {@code ridges}, {@code temperature} and {@code humidity} feed biome selection;
  * {@code height} (blocks) and {@code rough3d} (how much 3D noise may blur the surface) shape the terrain
- * through {@code vantraya_builder:depth} and {@code vantraya_builder:sloped_cheese}.
+ * through {@code vantraya_builder:depth} and {@code vantraya_builder:sloped_cheese}; {@code protect} (1 within
+ * {@link Spec#PROTECT_RADIUS} of a landmark centre, else 0) keeps cave entrances and noodle tunnels off those centres.
  *
  * <p>The function depends only on {@code x} and {@code z}, so it is wrapped in {@code flat_cache} by the
  * data: it is evaluated once per 4 x 4 block quart and Minecraft interpolates between the samples.
@@ -41,7 +43,8 @@ public final class VantrayaField implements DensityFunction {
         TEMPERATURE("temperature", -1.2, 1.2),
         HUMIDITY("humidity", -1.2, 1.2),
         HEIGHT("height", -64.0, 320.0),
-        ROUGH3D("rough3d", 0.0, 1.0);
+        ROUGH3D("rough3d", 0.0, 1.0),
+        PROTECT("protect", 0.0, 1.0);
 
         private final String id;
         private final double min;
@@ -80,6 +83,8 @@ public final class VantrayaField implements DensityFunction {
                     return f.humidity();
                 case HEIGHT:
                     return f.height();
+                case PROTECT:
+                    return Spec.protection(f.x(), f.z());
                 default:
                     return f.rough3d();
             }

@@ -353,7 +353,7 @@ class InEngineWorldgenTest {
     void theSpecificationVerifiesOnTheRealEngineForSeveralWorldSeeds(MinecraftServer server) {
         VantrayaChunkGenerator gen = generator(server);
         List<String> problems = new ArrayList<>(); // all seeds, so one run tells everything
-        for (long seed : new long[] {0L, 20250929L, -987654321L, 4242L}) {
+        for (long seed : new long[] {0L, 20250929L, -987654321L, 4242L, 1L, 2L, 3L, 31337L}) {
             RandomState rs = randomState(server, gen, seed);
             List<SpecVerifier.Check> checks = SpecVerifier.run(engineProbe(gen, rs));
             assertTrue(checks.size() >= 20, "the verifier ran only " + checks.size() + " checks");

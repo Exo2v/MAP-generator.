@@ -53,6 +53,40 @@ def field(channel):
     }
 
 
+def protect_landmark_centres(final_density):
+    """Keep vanilla's cave entrances and noodle tunnels from opening the surface around a landmark centre.
+
+    The specification gives every landmark centre an exact elevation (and a new world spawns at the Forgotten
+    Coast's), but vanilla's ``min(sloped_cheese, 5 * entrances)`` carves from the surface down to ~17 blocks, and
+    ``min(final_density, noodle)`` carves anywhere: the first in-engine run found a 17-block cave pit in the pinned top
+    of the Hermit's Spire. Within Spec.PROTECT_RADIUS of every landmark centre the ``protect`` channel is 1, which
+    lifts both terms far above any terrain density, so they cannot carve there. Caves underground (the other branch
+    of the range choice) are untouched. Asserts that exactly one of each is found, so a change in vanilla's data
+    fails the generator instead of silently dropping the guard.
+    """
+    guard = {"type": "minecraft:mul", "argument1": 1000.0, "argument2": f"{MOD}:field/protect"}
+    hits = {"entrances": 0, "noodle": 0}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if (node.get("type") == "minecraft:mul" and node.get("argument1") == 5.0
+                    and node.get("argument2") == "minecraft:overworld/caves/entrances"):
+                hits["entrances"] += 1
+                return {"type": "minecraft:add", "argument1": node, "argument2": copy.deepcopy(guard)}
+            return {k: walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+
+    out = walk(final_density)
+    assert out["type"] == "minecraft:min" and out["argument2"] == "minecraft:overworld/caves/noodle", out.get("argument2")
+    out["argument2"] = {"type": "minecraft:add", "argument1": "minecraft:overworld/caves/noodle",
+                        "argument2": copy.deepcopy(guard)}
+    hits["noodle"] += 1
+    assert hits == {"entrances": 1, "noodle": 1}, hits
+    return out
+
+
 def replace_ids(node, mapping):
     if isinstance(node, dict):
         return {k: replace_ids(v, mapping) for k, v in node.items()}
@@ -85,7 +119,7 @@ def main(vanilla):
         base_3d_noise = json.load(f)
 
     # ---- density functions ----------------------------------------------------------------
-    for ch in ("continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d"):
+    for ch in ("continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d", "protect"):
         write(f"worldgen/density_function/field/{ch}.json", field(ch))
 
     # depth = (H + 0.5 - y) / 128: positive below the ground, zero at the surface, exactly the scale of vanilla's
@@ -153,7 +187,7 @@ def main(vanilla):
         "minecraft:overworld/sloped_cheese": f"{MOD}:sloped_cheese",
         "minecraft:overworld/depth": f"{MOD}:depth",
     }
-    router["final_density"] = retarget_top_slide(replace_ids(router["final_density"], mapping))
+    router["final_density"] = protect_landmark_centres(retarget_top_slide(replace_ids(router["final_density"], mapping)))
 
     # initial_density_without_jaggedness: vanilla's formula with our depth and a constant factor
     initial = replace_ids(router["initial_density_without_jaggedness"], mapping)

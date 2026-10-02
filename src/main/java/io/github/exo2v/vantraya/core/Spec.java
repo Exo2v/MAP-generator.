@@ -179,6 +179,24 @@ public final class Spec {
                     w(0.30, 0.65), w(-0.40, 0.10), w(0.10, 0.60), w(-0.15, 0.40), w(-0.1, 0.8),
                     "cherry terraces, stone, gilded ruins"));
 
+    /**
+     * Radius, in blocks, around every landmark centre within which vanilla's cave entrances and noodle tunnels may
+     * not open the surface. The first in-engine run found a cave entrance 17 blocks deep in the pinned top of the
+     * Hermit's Spire, which contradicts "exact centre elevation" - and the Forgotten Coast's centre is where a new
+     * world spawns. Caves underground are untouched.
+     */
+    public static final double PROTECT_RADIUS = 64.0;
+
+    /** 1 within {@link #PROTECT_RADIUS} of a landmark centre, else 0 (the {@code protect} channel). */
+    public static double protection(double x, double z) {
+        for (Landmark lm : LANDMARKS) {
+            if (Math.hypot(x - lm.x(), z - lm.z()) < PROTECT_RADIUS) {
+                return 1.0;
+            }
+        }
+        return 0.0;
+    }
+
     /** The Veil of Salt "landmark" (rim): whole canvas, radius &gt; 3550. */
     public static final Landmark VEIL = new Landmark("veil_of_salt", "The Veil of Salt",
             0, 0, 0, -HALF, HALF, -HALF, HALF, ABYSS_FLOOR, SEA_LEVEL,

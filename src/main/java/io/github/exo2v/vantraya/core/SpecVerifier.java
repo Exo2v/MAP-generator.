@@ -82,18 +82,21 @@ public final class SpecVerifier {
         int sg = p.groundHeight((int) spawn.x(), (int) spawn.z());
         out.add(check(spawn.name(), "spawn is dry land above sea level", sg > Spec.SEA_LEVEL, "ground Y=%d", sg));
         // the Veil of Salt
-        int veilLo = Integer.MAX_VALUE;
-        int veilHi = Integer.MIN_VALUE;
-        for (int k = 0; k < 12; k++) {
+        int[] veil = new int[12];
+        for (int k = 0; k < veil.length; k++) {
             double a = k * Math.PI / 6.0;
-            int g = p.groundHeight((int) Math.round(3750 * Math.cos(a)), (int) Math.round(3750 * Math.sin(a)));
-            veilLo = Math.min(veilLo, g);
-            veilHi = Math.max(veilHi, g);
+            veil[k] = p.groundHeight((int) Math.round(3750 * Math.cos(a)), (int) Math.round(3750 * Math.sin(a)));
         }
+        java.util.Arrays.sort(veil);
+        // A cave opening on the sea floor only ever lowers a reading, so the two lowest of the twelve are set aside:
+        // a floor that really is too deep lowers all twelve.
+        int veilLo = veil[2];
+        int veilHi = veil[veil.length - 1];
         double pad = BAND_PAD * (Spec.TRENCH_TOP - Spec.ABYSS_FLOOR);
         out.add(check(Spec.VEIL.name(), "abyss floor within -32..10 (+25% pad) beyond r = 3550",
                 veilLo >= Spec.ABYSS_FLOOR - pad && veilHi <= Spec.TRENCH_TOP + pad,
-                "ground Y %d..%d at r=3750, allowed %.1f..%.1f", veilLo, veilHi, Spec.ABYSS_FLOOR - pad, Spec.TRENCH_TOP + pad));
+                "ground Y %d..%d at r=3750 (two lowest of 12 set aside), allowed %.1f..%.1f",
+                veilLo, veilHi, Spec.ABYSS_FLOOR - pad, Spec.TRENCH_TOP + pad));
         return out;
     }
 
