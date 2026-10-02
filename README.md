@@ -104,6 +104,16 @@ and a naive terrain generator disagree:
 
 ---
 
+## Full technical walkthrough
+
+[`docs/HANDOFF.md`](docs/HANDOFF.md) is a self-contained build guide: the specification's data
+tables, every algorithm and formula in the generation pipeline (continentalness splines, the
+Lithosphere range windows, climate tiers, landmark shapers, the shelf dropoff, hydrology and
+the river logic, the dry-landform masks, re-pinning, the surface rule), the Anvil/`level.dat`
+export format and the decoration contract, the exact commands to build, verify, package and
+release the world, sizing and throughput figures, and the failure modes the design guards
+against. Start there for anything deeper than the quick start below.
+
 ## Quick start
 
 ### 1. Run it live in a browser (no install)
