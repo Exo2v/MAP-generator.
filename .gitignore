@@ -1,0 +1,25 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- PyInstaller build artifacts ----
+build/
+dist/
+*.spec
+tools/mapgen_entry.py
+
+# ---- generated worlds / maps (never commit player data) ----
+saves/
+*.mca
+*.schem
+mapgen_out/
+out/
+
+# ---- editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

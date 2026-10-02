@@ -1,0 +1,383 @@
+Ashenfall: Master World Map & Geological
+Specification
+Complete Technical Data: Heightmaps, Coordinates, Lithosphere Splines, Climate Gradients
+& Still Life Population
+Target Engine: Minecraft 1.21.1 (Pack 48) · Canvas: 8,000 × 8,000 Blocks · World: Continent of Vantyra · Author: Ashenfall
+Engineering
+MASTER WORLDGEN BLUEPRINT: This document provides the definitive, production-grade specification for generating the
+finite 8,000 × 8,000 block continent of Vantyra. It establishes: (1) Exact 16-bit uint16 heightmap conversion math and Hermite
+continental shelf dropoff equations; (2) Spatial bounding boxes, target elevations, and coordinates for all 9 cardinal landmarks; (3)
+Lithosphere cubic spline density function mappings (continents, erosion, ridges); (4) The 5-dimensional multi-noise climate tensor,
+thermal lapse formulas, and anti-snow-pocket buffer rules; and (5) The 3 deterministic methodologies to force Still Life flora and
+feature decoration (fallen logs, mossy boulders, multi-tier canopies) across habitable sectors while preserving barren calderas and
+sheer cliffs.
+1. Heightmap Data & Elevation Mathematical Specification
+The continent of Vantyra operates on Minecraft 1.21.1's extended world height ceiling: Y = -64 to Y = 320 (Total: 384 vertical
+blocks). Sea level is anchored at Y = 62.
+16-Bit uint16 Normalization Equation: Every pixel in the master heightfield maps directly to a discrete block height through
+linear transformation:
+h_norm = (Y - min_y) / (max_y - min_y) = (Y + 64.0) / 384.0
+uint16_value = round(h_norm * 65535.0)
+Y_block = -64.0 + (uint16_value / 65535.0) * 384.0
+Geological Feature
+Target Y Block
+Norm [0..1]
+16-Bit uint16
+Lithosphere Layer / Material
+Bedrock Floor
+Y = -64.0
+0.0000
+0
+Solid Bedrock Floor
+Abyssal Trench (Veil of Salt)
+Y = -32.0 to 10.0
+0.0833 - 0.1927
+5,461 - 12,629
+Deep Cold Ocean / Gravel
+Sunken Caldera Crater
+Floor
+Y = 38.0 - 42.0
+0.2656 - 0.2760
+17,406 - 18,088
+Basalt / Lava Basins / Netherite
+Sunken Reach Drowned
+Shelf
+Y = 52.0 - 56.0
+0.3021 - 0.3125
+19,798 - 20,480
+Warm Ocean Reefs / Sandbars
+Mean Sea Level (Water
+Line)
+Y = 62.0
+0.3281
+21,504
+Water Surface / Sea Surface
+Forgotten Coast Shoreline
+Y = 68.0 - 74.0
+0.3438 - 0.3594
+22,532 - 23,556
+Stony Shore / Cold Pebble Beaches
+Gilded Dunes Low Mesas
+Y = 82.0 - 96.0
+0.3802 - 0.4167
+24,917 - 27,307
+Terracotta / Red Sandstone
+Cogwork March Quarry
+Benches
+Y = 85.0 - 110.0
+0.3880 - 0.4531
+25,428 - 29,695
+Terraced Badlands (9m steps)
+Caldera Volcanic Rim
+Y = 142.0 -
+156.0
+0.5365 - 0.5729
+35,158 - 37,548
+Blackstone / Basalt Spines
+Subalpine Taiga Foothills
+Y = 150.0 -
+190.0
+0.5573 - 0.6615
+36,523 - 43,351
+Podzol / Coarse Dirt (Pine Tree Limit)
+
+Glacial Spine Arêtes &
+Horns
+Y = 220.0 -
+279.2
+0.7396 - 0.8938
+48,471 - 58,575
+Frozen Peaks / Blue Glacier Ice
+World Build Limit Ceiling
+Y = 320.0
+1.0000
+65,535
+Atmospheric Sky Ceiling
+Continental Shelf Dropoff (Hermite S-Curve Formula): Beyond the continental shelf radius of $R_{\text{inner}} = 3{,}300$
+blocks, terrain descends monotonically into the abyss, reaching maximum oceanic depth at $R_{\text{outer}} = 3{,}800$ blocks.
+The continuous dropoff is formulated as:
+t = clamp((radius - 3300.0) / (3800.0 - 3300.0), 0.0, 1.0)
+S(t) = 3.0 * t^2 - 2.0 * t^3   # Continuous Cubic Hermite Spline
+H_drop(R) = -600.0 * S(t)       # Deep ocean dropoff plunging into the Veil of Salt
+2. Landformations & Exact Coordinate Specifications
+The continent of Vantyra is centered at $(X=0, Z=0)$, spanning exactly $-4{,}000$ to $+4{,}000$ blocks along both horizontal
+axes. The 9 cardinal landmarks are fixed at the following designated coordinates:
+Landmark Name
+Center Coord
+Bounding Box
+(X1..X2, Z1..Z2)
+Target Y
+Geological Formation Rules
+1. Forgotten Coast
+(Spawn)
+(0, 68, 2500)
+X: [-600, 600]
+Z: [2000, 3200]
+68 - 74
+Cold pebble bluffs, rolling wildflower bluffs,
+ancient stone beacon, starter pier.
+2. Cogwork March
+(-2100, 85, 0)
+X: [-2800, -1400]
+Z: [-700, 700]
+85 - 110
+Concentric 9m quarry steps, brass river
+chasms, Create factory benches.
+3. The Ashen
+Caldera
+(0, 80, 0)
+X: [-750, 750]
+Z: [-750, 750]
+38 - 150
+Volcanic ring wall (Y=146), sunken crater
+basin (Y=40), Obsidian Throne spire (Y=92).
+4. Solitary Glacial
+Spine
+(0, 220, -2500)
+X: [-1800, 1800]
+Z: [-3500, -1500]
+180 - 279
+Alpine cordillera, Matterhorn arêtes, cirque
+tarns, flash-frozen pilgrim trails.
+5. The Gilded
+Dunes
+(2300, 75, 0)
+X: [1600, 3100]
+Z: [-800, 800]
+75 - 94
+Vitrified black-glass dunes, 45° barchan
+ridges, terracotta canyon mesas.
+6. The Whispering
+Fen
+(2000, 63, 2000)
+X: [1300, 2700]
+Z: [1300, 2700]
+62 - 66
+Flat sunken bayous, braided delta channels,
+giant fungal heartwood trees.
+7. The Sunken
+Reach
+(-2400, 54,
+1600)
+X: [-3200, -1700]
+Z: [1000, 2300]
+50 - 62
+Drowned coastal caldera shelf (100 fathoms),
+coral atolls, barrier sandbars.
+8. The Hermit's
+Spire
+(-1800, 140,
+-1800)
+X: [-2300, -1300]
+Z: [-2300, -1300]
+140 - 185
+Solitary granite needles, ascetic rope bridges,
+silent wind-scoured cloisters.
+9. The Byzantine
+Choir
+(1800, 120,
+-1800)
+X: [1300, 2300]
+Z: [-2300, -1300]
+110 - 145
+Gilded resonant basilicas, pink cherry
+terraces, harmonic acoustic ruins.
+RIM: The Veil of
+Salt
+Radius > 3550
+Full perimeter to
+[-4000, 4000]
+-32 - 62
+Syrupy caustic brine abyss, white salt crusts,
+space unravels beyond 4000.
+3. Lithosphere Biomes & Spline Density Function Architecture
+Lithosphere entirely replaces vanilla piecewise linear interpolation with Continuous Cubic Hermite Splines ($S(t) = 3t^2 -
+2t^3$). The macro-terrain is governed by three primary density functions in datapacks/ashenfall_data2:
+  continents.json: Continuous cubic spline mapping continentalness $C \in [-1.2, 1.2]$. Ocean basins are clamped below $C
+ < -0.20$; landmass emerges smoothly at $C \ge 0.05$.
+ erosion.json: Multi-octave domain-warped spline ($E \in [-1.0, 1.0]$). Low erosion ($E < -0.45$) produces jagged alpine
+arêtes; high erosion ($E > 0.35$) produces flat floodplains and bayous.
+ ridges.json: Folding harmonic spline ($R \in [-1.0, 1.0]$). Carves wide U-shaped river valleys at $R \approx 0$ while
+ASHENFALL GEOLOGICAL SPECIFICATION: Master Continent of Vantyra
+Lithosphere & Still Life Engine
+Ashenfall: The Broken Realm · Master World Map Specification · Minecraft 1.21.1 NeoForge
+Page 2 of 4
+
+cresting sharp ridges at $|R| \approx 1$.
+Region
+Target Lithosphere
+Biomes
+Cont (C)
+Erosion (E)
+Ridges (R)
+Surface Blocks (Lithosphere)
+Forgotten Coast
+minecraft:plains
+minecraft:meadow
+0.10 - 0.30
+-0.10 - 0.20
+-0.30 - 0.30
+Grass Block, Podzol, Stony
+Shore
+Glacial Spine
+minecraft:frozen_peaks
+minecraft:jagged_peaks
+minecraft:grove
+0.45 - 0.90
+-0.80 - -0.45
+0.50 - 0.95
+Snow Block, Packed Ice,
+Calcite, Stone
+Cogwork March
+minecraft:windswept_hills
+minecraft:wooded_badlan
+ds
+0.25 - 0.60
+-0.35 - 0.15
+-0.80 - -0.20
+Orange/Yellow Terracotta,
+Stone, Andesite
+Ashen Caldera
+minecraft:basalt_deltas
+minecraft:eroded_badland
+s
+0.20 - 0.50
+-0.20 - 0.30
+0.00 - 0.40
+Basalt, Blackstone, Magma
+Block, Obsidian
+Gilded Dunes
+minecraft:desert
+minecraft:badlands
+0.20 - 0.55
+0.25 - 0.70
+-0.40 - 0.40
+Red Sand, Sandstone,
+Terracotta
+Whispering Fen
+minecraft:swamp
+minecraft:mangrove_swa
+mp
+0.05 - 0.25
+0.40 - 0.85
+-0.20 - 0.20
+Mud, Peat, Moss, Coarse Dirt
+Sunken Reach
+minecraft:warm_ocean
+minecraft:lukewarm_ocea
+n
+-0.35 - -0.10
+0.10 - 0.50
+-0.50 - 0.50
+Sand, Coral Reefs, Prismarine
+Gravel
+Veil of Salt (Abyss)
+minecraft:deep_cold_ocea
+n
+minecraft:deep_ocean
+-0.90 - -0.45
+-0.60 - 0.40
+-1.00 - 1.00
+Gravel, Deepslate, Packed Salt
+4. Temperature Gradient, Altitude Lapse Rates & Biome Blending
+The 5-Tier Climate Separation Rule: Previous worldgen builds suffered from the 'snow-pocket glitch'—isolated patches of
+frozen snow generating inside temperate forests. This occurred because temperate and freezing biomes were separated by
+only 0.10 temperature units, allowing noise jitter to flip the Voronoi cell. In Ashenfall, climate is governed by strict 0.55-unit
+temperature buffering:
+Climate Tier
+Normalized Temp
+(T)
+Humidity (H)
+Target Geography & Buffer Behavior
+Tier 0: Glacial Arctic
+T <= -0.75
+H: [-0.4, 0.4]
+Glacial Spine summits (Y > 180). Frozen peaks, ice
+sheets, permafrost.
+Tier 1: Boreal Buffer
+Belt
+-0.60 <= T <= -0.25
+H: [-0.2, 0.6]
+Mandatory 600-block non-snowy pine taiga buffer.
+Prevents snow from touching temperate plains.
+Tier 2: Temperate
+Lowlands
+-0.15 <= T <= 0.40
+H: [-0.1, 0.8]
+Forgotten Coast, plains, meadows, oak/birch woodlands.
+Tier 3: Subtropical
+Bayou
+0.35 <= T <= 0.60
+H: [0.5, 1.0]
+Whispering Fen. Saturated peat, mangrove deltas, warm
+swamps.
+Tier 4: Arid &
+Volcanic
+T >= 0.70
+H: [-0.8, -0.2]
+Gilded Dunes and Ashen Caldera. Desert sand seas,
+terracotta badlands, basalt sinks.
+Atmospheric Altitude Lapse Rate Formula: Temperature decreases linearly with elevation above sea level ($Y = 62$),
+simulating genuine adiabatic expansion:
+ASHENFALL GEOLOGICAL SPECIFICATION: Master Continent of Vantyra
+Lithosphere & Still Life Engine
+Ashenfall: The Broken Realm · Master World Map Specification · Minecraft 1.21.1 NeoForge
+Page 3 of 4
+
+# Effective Temperature = Latitude Base + Altitude Lapse Rate
+T_eff(x, y, z) = T_base(x, z) - 0.0055 * max(0.0, y - 62.0)
+# High summits at Y=220 experience a -0.869 temperature reduction, guaranteeing snow caps.
+5D Voronoi Metric & Biome Blending: Biome placement evaluates the Euclidean distance in 5D multi-noise space,
+smoothed across an 8-block Voronoi cell radius:
+D(P, B_i) = sqrt((T - T_i)^2 + (H - H_i)^2 + (C - C_i)^2 + (E - E_i)^2 + (W - W_i)^2)
+biome_blend_radius = 4  # 9x9 chunk voxel smoothing in Minecraft client options
+5. Population Instructions: How to Force Still Life to Generate Where Desired
+Still Life features (branched canopy trees, fallen birch/oak logs, glacial erratic boulders, and wildflower carpets) do not rely on
+random brush strokes. They are governed by three deterministic mechanisms that can be programmatically forced:
+Method 1: The WorldPainter 'Populate' Layer (100% Guaranteed Native Decorator Pass):
+When pre-generating terrain via WorldPainter or Python, never export chunks as Status: 'full'. Instead, apply the binary
+ASHFALL_POPULATE_MASK.png to WorldPainter's native Populate layer. When Minecraft loads a chunk flagged with
+Populate, its internal world decorator natively executes Still Life's entire placed feature registry. Valleys receive lush trees and
+fallen logs; cliffs and volcanic calderas remain completely bare.
+Method 2: Still Life Biome Tag Injections (Datapack Level):
+Still Life feature placement is bound to biome tags in data/still_life/tags/worldgen/biome/. By adding target biomes into these
+tags, Still Life is forced to generate in those specific biomes:
+# data/still_life/tags/worldgen/biome/has_canopy.json -> ["minecraft:plains", "minecraft:forest"]
+# data/still_life/tags/worldgen/biome/has_fallen_logs.json -> ["minecraft:forest", "minecraft:taiga"]
+# data/still_life/tags/worldgen/biome/has_boulders.json -> ["minecraft:windswept_hills", "minecraft:meadow"]
+Method 3: The Still Life Slope-Aware Surface Rule:
+Still Life inspects local geological slope angles. Tree and log decorators require grass/dirt surface blocks. Terrain steeper than
+$35^\circ$ automatically strips topsoil to bare rock scree, naturally preventing trees from generating on cliff faces:
+Slope Angle (θ)
+Surface Block (Still Life Rule)
+Vegetation & Feature Population Density
+0° <= θ < 25°
+Grass Block / Deep Loam (3-5
+blocks)
+100% Full Canopy Trees, Fallen Logs, Wildflowers, Shrub
+understory.
+25° <= θ <= 35°
+Coarse Dirt, Permadirt, Podzol
+40% Density: Pine Taiga, berry bushes, small stone erratics.
+35° < θ <= 45°
+Cobblestone, Stone Scree, Gravel
+5% Density: Mossy boulders, clinging lichen. Trees strictly
+excluded.
+θ > 45° (Sheer Cliffs)
+Solid Bedrock, Granite, Basalt
+0% Population: 100% bare rock scree. No trees or logs can
+spawn.
+Y > 225.0 (Treeline)
+Snow Block, Packed Ice, Calcite
+0% Population: Climatic treeline cutoff. High-altitude glacial frost.
+Caldera Rim / Crater
+Blackstone, Basalt, Magma Block
+0% Population: Volcanic barrenness mask overrides all foliage.
+Turnkey Execution Command: To re-generate all heightmaps, 16-bit uint16 assets, Still Life populate masks, and JSR-223
+WorldPainter scripts, run:
+python generate_ashfall.py --res 2048 --out worldpainter
+# Output: ASHFALL_HEIGHTMAP_16BIT.png, ASHFALL_POPULATE_MASK.png, ashenfall_worldpainter_setup.js
+ASHENFALL GEOLOGICAL SPECIFICATION: Master Continent of Vantyra
+Lithosphere & Still Life Engine
+Ashenfall: The Broken Realm · Master World Map Specification · Minecraft 1.21.1 NeoForge
+Page 4 of 4
