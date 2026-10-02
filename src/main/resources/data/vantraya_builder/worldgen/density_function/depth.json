@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:add",
+  "argument1": {
+    "type": "minecraft:mul",
+    "argument1": 0.0078125,
+    "argument2": "vantraya_builder:field/height"
+  },
+  "argument2": {
+    "type": "minecraft:add",
+    "argument1": 0.00390625,
+    "argument2": {
+      "type": "minecraft:mul",
+      "argument1": -0.0078125,
+      "argument2": "minecraft:y"
+    }
+  }
+}

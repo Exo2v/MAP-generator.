@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:flat_cache",
+  "argument": {
+    "type": "vantraya_builder:field",
+    "channel": "humidity",
+    "seed_noise": "vantraya_builder:seed_probe"
+  }
+}

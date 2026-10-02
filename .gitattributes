@@ -1,0 +1,5 @@
+*.jar binary
+*.png binary
+*.pdf binary
+*.bat text eol=crlf
+src/generated/**/*.json text eol=lf

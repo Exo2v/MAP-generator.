@@ -1,0 +1,35 @@
+{
+  "dimensions": {
+    "minecraft:overworld": {
+      "type": "vantraya_builder:vantraya",
+      "generator": {
+        "type": "vantraya_builder:vantraya",
+        "biome_source": {
+          "type": "vantraya_builder:vantraya"
+        },
+        "settings": "vantraya_builder:vantraya"
+      }
+    },
+    "minecraft:the_end": {
+      "type": "minecraft:the_end",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:the_end"
+        },
+        "settings": "minecraft:end"
+      }
+    },
+    "minecraft:the_nether": {
+      "type": "minecraft:the_nether",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:multi_noise",
+          "preset": "minecraft:nether"
+        },
+        "settings": "minecraft:nether"
+      }
+    }
+  }
+}

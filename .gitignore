@@ -1,0 +1,25 @@
+# gradle / build outputs
+.gradle/
+build/
+out/
+run/
+runs/
+run-data/
+repo/
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.metadata/
+bin/
+eclipse/
+.vscode/
+
+# local scratch
+*.log
+hs_err_pid*

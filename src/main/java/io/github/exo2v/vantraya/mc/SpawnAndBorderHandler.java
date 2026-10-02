@@ -1,0 +1,57 @@
+package io.github.exo2v.vantraya.mc;
+
+import io.github.exo2v.vantraya.VantrayaBuilder;
+import io.github.exo2v.vantraya.core.Spec;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+
+/**
+ * Server glue for Vantraya worlds: the specification's spawn and, optionally, its finite canvas.
+ */
+public final class SpawnAndBorderHandler {
+    private SpawnAndBorderHandler() {
+    }
+
+    /**
+     * "1. Forgotten Coast (Spawn)": a new Vantraya world starts on the beach at (0, 68, 2500) instead of wherever
+     * vanilla's climate search would put it (which, around the origin, would be inside the volcano).
+     */
+    public static void onCreateSpawnPosition(LevelEvent.CreateSpawnPosition event) {
+        if (!(event.getLevel() instanceof ServerLevel level) || level.dimension() != Level.OVERWORLD) {
+            return;
+        }
+        ChunkGenerator generator = level.getChunkSource().getGenerator();
+        if (!(generator instanceof VantrayaChunkGenerator) || !VantrayaConfig.spawnAtForgottenCoast()) {
+            return;
+        }
+        Spec.Landmark spawn = Spec.spawnLandmark();
+        int x = (int) spawn.x();
+        int z = (int) spawn.z();
+        int y = generator.getBaseHeight(x, z, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, level,
+                level.getChunkSource().randomState());
+        event.getSettings().setSpawn(new BlockPos(x, y, z), 0.0F);
+        event.setCanceled(true); // skip vanilla's spawn search
+        VantrayaBuilder.LOGGER.info("Vantraya: world spawn set to the {} at {}, {}, {}", spawn.name(), x, y, z);
+    }
+
+    /** Optional 8,000-block border, applied once to a world whose border has never been touched. */
+    public static void onServerStarted(ServerStartedEvent event) {
+        ServerLevel overworld = event.getServer().overworld();
+        if (!(overworld.getChunkSource().getGenerator() instanceof VantrayaChunkGenerator)
+                || !VantrayaConfig.enforceWorldBorder()) {
+            return;
+        }
+        WorldBorder border = overworld.getWorldBorder();
+        if (border.getSize() > 1.0E7) { // still the vanilla default: nobody has set a border yet
+            border.setCenter(0.0, 0.0);
+            border.setSize(Spec.CANVAS);
+            VantrayaBuilder.LOGGER.info("Vantraya: world border set to {} blocks around the origin", Spec.CANVAS);
+        }
+    }
+}

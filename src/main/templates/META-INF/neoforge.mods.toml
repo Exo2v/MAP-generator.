@@ -1,0 +1,50 @@
+# Vantraya Builder - NeoForge mod metadata (placeholders are expanded by the generateModMetadata task).
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+issueTrackerURL="https://github.com/Exo2v/MAP-generator./issues"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+displayURL="https://github.com/Exo2v/MAP-generator."
+authors="${mod_authors}"
+description='''${mod_description}'''
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neo_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# ---------------------------------------------------------------------------
+# Optional companions.  None of them is required: the Vantraya world type is
+# self-contained.  They are declared (type="optional", any version) so that, when
+# present, they load first and Vantraya Builder can detect and report them.
+# ---------------------------------------------------------------------------
+
+# Library used by Tectonic and many other worldgen mods; Vantraya's dimension is the normal
+# `minecraft:overworld` level stem, so Lithostitched worldgen modifiers that target the
+# overworld apply to a Vantraya world too.
+[[dependencies.${mod_id}]]
+    modId="lithostitched"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="tectonic"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
