@@ -28,6 +28,16 @@ git fetch origin -q
 git reset --hard "origin/$BRANCH" >/dev/null 2>&1
 echo "   HEAD $(git log --oneline -1)"
 
+echo "== published shards =="
+if ls release/ashenfall-world/*.zip >/dev/null 2>&1; then
+  n=$(ls release/ashenfall-world/*.zip | wc -l)
+  echo "   $n shard(s) in the branch, restoring them into out/ashenfall"
+  python3 tools/pack_world_download.py out/ashenfall/Ashenfall \
+      --out release/ashenfall-world --restore | tail -3
+else
+  echo "   none"
+fi
+
 echo "== generated output =="
 if [ -d out/ashenfall ]; then
   echo "   $(find out/ashenfall -name '*.mca' 2>/dev/null | wc -l) region files, $(du -sh out/ashenfall 2>/dev/null | cut -f1)"
