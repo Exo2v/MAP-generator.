@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,7 +29,7 @@ jobs:
           set -o pipefail
           ./gradlew build --no-daemon 2>&1 | tee build.log
 
-      # A green tick alone does not say how many tests ran, so count them (and say so on the run's summary).
+      # A green tick alone does not say how many tests ran, so count them per suite (and say so on the run's summary).
       - name: Count the tests that ran
         if: always()
         run: |
@@ -36,13 +37,16 @@ jobs:
           import glob
           import xml.etree.ElementTree as ET
           total = failures = errors = skipped = 0
-          for path in glob.glob('build/test-results/test/*.xml'):
+          lines = []
+          for path in sorted(glob.glob('build/test-results/test/*.xml')):
               suite = ET.parse(path).getroot()
-              total += int(suite.get('tests', 0))
-              failures += int(suite.get('failures', 0))
-              errors += int(suite.get('errors', 0))
-              skipped += int(suite.get('skipped', 0))
-          print(f"::notice title=Tests::{total} tests ran: {failures} failures, {errors} errors, {skipped} skipped")
+              n, f, e, k = (int(suite.get(a, 0)) for a in ('tests', 'failures', 'errors', 'skipped'))
+              total += n
+              failures += f
+              errors += e
+              skipped += k
+              lines.append(f"{suite.get('name').rsplit('.', 1)[-1]}: {n}" + (f" ({f} failed, {e} errors)" if f or e else ""))
+          print(f"::notice title=Tests::{total} tests ran: {failures} failures, {errors} errors, {skipped} skipped - " + "; ".join(lines))
           if total == 0:
               print("::error title=Tests::no test results were found - the tests did not run")
               raise SystemExit(1)
@@ -100,6 +104,6 @@ jobs:
         run: |
           {
             grep -E -A4 ' FAILED$' build.log || true
-            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:' build.log || true
+            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:|FATAL|Failed to (load|start)' build.log || true
           } | head -60 | sed 's/%/%25/g; s/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
           echo "::error title=Why the build failed::$(cat /tmp/why.txt)"
