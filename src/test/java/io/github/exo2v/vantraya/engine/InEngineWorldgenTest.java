@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import com.google.gson.JsonElement;
@@ -80,6 +81,7 @@ import net.neoforged.testframework.junit.EphemeralTestServerProvider;
  * ({@code buildSurface} needs a {@code WorldGenRegion}), feature decoration, spawning.
  */
 @ExtendWith(EphemeralTestServerProvider.class)
+@Timeout(value = 4, unit = TimeUnit.MINUTES) // the provider waits forever if the server thread dies while starting
 class InEngineWorldgenTest {
 
     private static final int MIN_Y = -64;

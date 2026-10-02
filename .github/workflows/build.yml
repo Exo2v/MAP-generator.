@@ -25,8 +25,17 @@ jobs:
       # compiles against NeoForge 1.21.1, runs the specification tests (landmark pins, Java-vs-Python parity, the
       # noise-router checks) and assembles the mod jar
       - name: Build and test
+        timeout-minutes: 14
         run: |
           set -o pipefail
+          # Watchdog: a build still running after 9 minutes is stuck (it normally takes 4-5). Dump the threads of the
+          # test JVM so the cause can be read afterwards.
+          (
+            sleep 540
+            for pid in $(pgrep -f 'Gradle Test Executor' || true); do
+              jstack "$pid" > "/tmp/threads-$pid.txt" 2>&1 || true
+            done
+          ) &
           ./gradlew build --no-daemon 2>&1 | tee build.log
 
       # A green tick alone does not say how many tests ran, so count them per suite (and say so on the run's summary).
@@ -103,7 +112,14 @@ jobs:
         if: failure()
         run: |
           {
+            for f in /tmp/threads-*.txt; do
+              [ -f "$f" ] || continue
+              echo "=== the test JVM was stuck; its threads ($(basename "$f")) ==="
+              awk '/^"/ { keep = ($0 ~ /Test worker|Server thread|^"main"|vantraya|ephemeral/) } keep' "$f" | head -90
+            done
             grep -E -A4 ' FAILED$' build.log || true
-            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:|FATAL|Failed to (load|start)' build.log || true
-          } | head -60 | sed 's/%/%25/g; s/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
+            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:|FATAL|Failed to (load|start)|Encountered an unexpected exception' build.log || true
+            echo "=== last lines of the build log ==="
+            tail -n 25 build.log
+          } | head -170 | sed 's/%/%25/g; s/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
           echo "::error title=Why the build failed::$(cat /tmp/why.txt)"
