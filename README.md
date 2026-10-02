@@ -63,7 +63,7 @@ F3 shows a `Vantraya:` line with the landmark, height, climate tier and the dens
 | `paintSurface` | `true` | apply the slope-aware surface table after the biome surface rules |
 | `keepCalderaDry` | `true` | drain the crater and pour its lava basins |
 | `enforceWorldBorder` | `false` | 8,000-block border centred on the origin, applied once to a fresh world |
-| `logCompatReport` | `true` | log detected companion mods and biome-tag contributions at server start |
+| `logCompatReport` | `true` | log detected companion mods and data packs and biome-tag contributions at server start |
 
 ## Working alongside Lithosphere, Still Life and Tectonic
 

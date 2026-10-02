@@ -5,7 +5,18 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -245,5 +256,60 @@ public class RouterTest {
             assertEquals(ch, field.get("channel").getAsString());
             assertEquals("vantraya_builder:seed_probe", field.get("seed_noise").getAsString());
         }
+    }
+
+    /** The vanilla functions the noise router may still reference: the Y coordinate and the cave set. */
+    private static final Set<String> SHARED_WITH_VANILLA = Set.of("minecraft:y",
+            "minecraft:overworld/caves/entrances", "minecraft:overworld/caves/noodle",
+            "minecraft:overworld/caves/pillars", "minecraft:overworld/caves/spaghetti_2d",
+            "minecraft:overworld/caves/spaghetti_roughness_function");
+
+    /** Every string under a key other than "type"/"noise" that points into the minecraft namespace. */
+    private static void collectVanillaReferences(JsonElement e, String key, Set<String> out) {
+        if (e.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> entry : e.getAsJsonObject().entrySet()) {
+                collectVanillaReferences(entry.getValue(), entry.getKey(), out);
+            }
+        } else if (e.isJsonArray()) {
+            e.getAsJsonArray().forEach(item -> collectVanillaReferences(item, key, out));
+        } else if (e.isJsonPrimitive() && e.getAsJsonPrimitive().isString()) {
+            String v = e.getAsString();
+            if (v.startsWith("minecraft:") && !"type".equals(key) && !"noise".equals(key)
+                    && (v.equals("minecraft:y") || v.contains("/"))) {
+                out.add(v);
+            }
+        }
+    }
+
+    /**
+     * Terrain overhauls (Lithosphere, Tectonic, ...) override vanilla density functions. The shape of this world's
+     * terrain must not depend on any function they might replace - that would move the landmark pins - so the
+     * terrain's own functions reference nothing in the minecraft namespace but the Y coordinate, and the router
+     * itself only the cave functions (which a cave overhaul is welcome to change).
+     */
+    @Test
+    public void terrainDependsOnNoVanillaFunctionAnotherPackCouldOverride() throws Exception {
+        URL dir = RouterTest.class.getResource("/data/vantraya_builder/worldgen/density_function");
+        Assume.assumeTrue("resources are a plain directory", dir != null && "file".equals(dir.getProtocol()));
+        Path root = Paths.get(dir.toURI());
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(root)) {
+            files = walk.filter(f -> f.toString().endsWith(".json")).collect(Collectors.toList());
+        }
+        assertTrue("the terrain functions are shipped", files.size() >= 10);
+        for (Path f : files) {
+            String rel = root.relativize(f).toString().replace('\\', '/');
+            Set<String> refs = new TreeSet<>();
+            collectVanillaReferences(DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/density_function/" + rel), "", refs);
+            refs.remove("minecraft:y");
+            assertTrue(rel + " must not reference vanilla density functions, found " + refs, refs.isEmpty());
+        }
+        Set<String> routerRefs = new TreeSet<>();
+        collectVanillaReferences(router, "", routerRefs);
+        for (String ref : routerRefs) {
+            assertTrue("the noise router references a vanilla function that is not a cave function: " + ref,
+                    SHARED_WITH_VANILLA.contains(ref));
+        }
+        assertTrue("the caves stay shared with vanilla", routerRefs.contains("minecraft:overworld/caves/noodle"));
     }
 }

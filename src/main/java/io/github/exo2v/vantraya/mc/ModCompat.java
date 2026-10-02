@@ -2,6 +2,7 @@ package io.github.exo2v.vantraya.mc;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -50,6 +51,22 @@ public final class ModCompat {
             }
         }
         VantrayaBuilder.LOGGER.info("Vantraya: companion mods detected: {}", found.isEmpty() ? "none" : found);
+        // Lithosphere and Still Life are published both as mods and as plain data packs; a data pack has no mod id,
+        // so also look at the data packs selected for this world.
+        try {
+            List<String> packs = new ArrayList<>();
+            for (String id : server.getPackRepository().getSelectedIds()) {
+                String s = id.toLowerCase(Locale.ROOT);
+                if (s.contains("lithosphere") || s.contains("tectonic") || s.contains("lithostitched")
+                        || (s.contains("still") && s.contains("life"))) {
+                    packs.add(id);
+                }
+            }
+            VantrayaBuilder.LOGGER.info("Vantraya: data packs that look like worldgen companions: {}",
+                    packs.isEmpty() ? "none" : packs);
+        } catch (RuntimeException e) {
+            VantrayaBuilder.LOGGER.debug("Vantraya: could not read the selected data packs", e);
+        }
         try {
             Registry<Biome> registry = server.registryAccess().registryOrThrow(Registries.BIOME);
             Map<String, Integer> namespaces = new TreeMap<>();

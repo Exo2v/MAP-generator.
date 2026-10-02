@@ -80,6 +80,9 @@ def main(vanilla):
         overworld = json.load(f)
     with open(os.path.join(vanilla, "dimension_type", "overworld.json"), encoding="utf-8") as f:
         dim_type = json.load(f)
+    with open(os.path.join(vanilla, "worldgen", "density_function", "overworld", "base_3d_noise.json"),
+              encoding="utf-8") as f:
+        base_3d_noise = json.load(f)
 
     # ---- density functions ----------------------------------------------------------------
     for ch in ("continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d"):
@@ -105,6 +108,12 @@ def main(vanilla):
         },
     })
 
+    # The 3D roughness noise is vanilla's, copied into our own namespace on purpose: terrain overhauls
+    # (Lithosphere, Tectonic, ...) may override minecraft:overworld/base_3d_noise, and that must not change
+    # the roughness - and with it the pinned elevations - of this world type. (The cave functions are
+    # deliberately NOT copied: referencing vanilla's lets a cave overhaul apply here too.)
+    write("worldgen/density_function/base_3d_noise.json", base_3d_noise)
+
     # sloped_cheese: vanilla's 4 * quarter_negative(depth * factor) + 3D noise, with a constant factor and the
     # 3D noise switched off by the model where a landmark's elevation is pinned (rough3d = 0).
     sloped_cheese = {
@@ -124,7 +133,7 @@ def main(vanilla):
         "argument2": {
             "type": "minecraft:mul",
             "argument1": f"{MOD}:field/rough3d",
-            "argument2": "minecraft:overworld/base_3d_noise",
+            "argument2": f"{MOD}:base_3d_noise",
         },
     }
     write("worldgen/density_function/sloped_cheese.json", sloped_cheese)

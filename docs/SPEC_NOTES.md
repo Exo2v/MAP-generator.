@@ -18,6 +18,7 @@ The handoff's own rule is **"if a specification datapoint is missing or ambiguou
 * **HANDOFF §3.4:** "25–35° → **40 % exposed rock** mixed into the topsoil".
 * **Offline Python:** every 25–35° column becomes coarse dirt (the "40 %" appears only in its docstring).
 * **Mod:** **40 % of the band's columns keep soil** (coarse dirt, some podzol), spread evenly by blue-noise dithering; the other **60 % are bare stone, gravel or andesite**. This is the PDF's reading (density of what can grow = density of soil), and it matches the progression 100 % → 40 % → 5 % → 0 % down the table. The HANDOFF's wording read literally gives the opposite split (40 % rock, 60 % soil).
+* **Why the PDF's reading is kept although HANDOFF outranks the PDF:** HANDOFF's *next* row says "35–45° | **5 % stone**", which cannot literally mean the share of exposed rock (steeper ground has more rock, not less); read as the PDF's *density* column — 100 % → 40 % → 5 % → 0 % — both rows make sense, and the 25–35° row's "exposed rock" wording looks like the same column re-worded as surface. Literally applied, HANDOFF's two rows would give 40 % rock at 30° but only 5 % at 40°. **Still open: please confirm** (you were asked and did not answer).
 * **Change:** `SurfaceLogic.DIRT_BAND_DENSITY` (0.40 → 0.60 for the HANDOFF reading). The 35–45° band is likewise "5 % density": 5 % of its columns are mossy-cobble patches, and a scree fraction `clip((θ − 35)/12, 0, 1)` (HANDOFF) of the rest is gravel/cobblestone.
 
 ### A2. The −180° / +180° entries of the coast table

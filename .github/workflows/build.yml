@@ -24,7 +24,59 @@ jobs:
       # compiles against NeoForge 1.21.1, runs the specification tests (landmark pins, Java-vs-Python parity, the
       # noise-router checks) and assembles the mod jar
       - name: Build and test
-        run: ./gradlew build --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew build --no-daemon 2>&1 | tee build.log
+
+      # A green tick alone does not say how many tests ran, so count them (and say so on the run's summary).
+      - name: Count the tests that ran
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          total = failures = errors = skipped = 0
+          for path in glob.glob('build/test-results/test/*.xml'):
+              suite = ET.parse(path).getroot()
+              total += int(suite.get('tests', 0))
+              failures += int(suite.get('failures', 0))
+              errors += int(suite.get('errors', 0))
+              skipped += int(suite.get('skipped', 0))
+          print(f"::notice title=Tests::{total} tests ran: {failures} failures, {errors} errors, {skipped} skipped")
+          if total == 0:
+              print("::error title=Tests::no test results were found - the tests did not run")
+              raise SystemExit(1)
+          PY
+
+      # What the jar must contain for the world type to exist in game: the Minecraft-facing classes, the preset and
+      # dimension type JSON, and mod metadata with every ${placeholder} expanded.
+      - name: Check the jar contents
+        run: |
+          jar=$(ls build/libs/*.jar | grep -v -- '-sources' | head -n 1)
+          echo "jar: $jar"
+          unzip -l "$jar" > /tmp/jar.txt
+          unzip -p "$jar" META-INF/neoforge.mods.toml > /tmp/mods.toml
+          if grep -q '\${' /tmp/mods.toml; then
+            echo "::error title=Jar::neoforge.mods.toml still contains an unexpanded placeholder"
+            grep -n '\${' /tmp/mods.toml
+            exit 1
+          fi
+          for entry in \
+              io/github/exo2v/vantraya/VantrayaBuilder.class \
+              io/github/exo2v/vantraya/mc/VantrayaChunkGenerator.class \
+              io/github/exo2v/vantraya/mc/VantrayaBiomeSource.class \
+              io/github/exo2v/vantraya/mc/VantrayaField.class \
+              data/vantraya_builder/worldgen/world_preset/vantraya.json \
+              data/vantraya_builder/dimension_type/vantraya.json \
+              data/vantraya_builder/worldgen/noise_settings/vantraya.json \
+              data/vantraya_builder/worldgen/density_function/base_3d_noise.json \
+              data/minecraft/tags/worldgen/world_preset/normal.json; do
+            if ! grep -q "$entry" /tmp/jar.txt; then
+              echo "::error title=Jar::missing from the jar: $entry"
+              exit 1
+            fi
+          done
+          echo "::notice title=Jar::$(basename "$jar"): $(tail -n 1 /tmp/jar.txt | xargs); metadata expanded, classes and data present"
 
       - name: Upload the mod jar
         uses: actions/upload-artifact@v4
@@ -40,3 +92,14 @@ jobs:
           name: test-reports
           path: build/reports/tests/test
           if-no-files-found: ignore
+
+      # When the build fails, put the reasons where they can be read without opening the full log: one annotation on
+      # the run with the compiler errors / failed tests.
+      - name: Explain a failed build
+        if: failure()
+        run: |
+          {
+            grep -E -A4 ' FAILED$' build.log || true
+            grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)|Caused by:' build.log || true
+          } | head -60 | sed 's/%/%25/g; s/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }' > /tmp/why.txt
+          echo "::error title=Why the build failed::$(cat /tmp/why.txt)"

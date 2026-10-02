@@ -15,6 +15,6 @@
   "argument2": {
     "type": "minecraft:mul",
     "argument1": "vantraya_builder:field/rough3d",
-    "argument2": "minecraft:overworld/base_3d_noise"
+    "argument2": "vantraya_builder:base_3d_noise"
   }
 }
