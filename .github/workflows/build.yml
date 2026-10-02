@@ -39,14 +39,22 @@ jobs:
           ./gradlew build --no-daemon 2>&1 | tee build.log
 
       # A green tick alone does not say how many tests ran, so count them per suite (and say so on the run's summary).
+      # Every failed or skipped test also gets an annotation of its own with its message: the logs and test reports
+      # cannot be downloaded from outside GitHub, and one shared annotation is cut at 4096 characters.
       - name: Count the tests that ran
         if: always()
         run: |
           python3 - <<'PY'
           import glob
           import xml.etree.ElementTree as ET
+
+          def esc(s, prop=False):
+              s = s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              return s.replace(':', '%3A').replace(',', '%2C') if prop else s
+
           total = failures = errors = skipped = 0
           lines = []
+          problems = []
           for path in sorted(glob.glob('build/test-results/test/*.xml')):
               suite = ET.parse(path).getroot()
               n, f, e, k = (int(suite.get(a, 0)) for a in ('tests', 'failures', 'errors', 'skipped'))
@@ -54,8 +62,18 @@ jobs:
               failures += f
               errors += e
               skipped += k
-              lines.append(f"{suite.get('name').rsplit('.', 1)[-1]}: {n}" + (f" ({f} failed, {e} errors)" if f or e else ""))
+              lines.append(f"{suite.get('name').rsplit('.', 1)[-1]}: {n}" + (f" ({f} failed, {e} errors)" if f or e else "") + (f" ({k} skipped)" if k else ""))
+              for case in suite.iter('testcase'):
+                  name = f"{case.get('classname', '').rsplit('.', 1)[-1]}.{case.get('name')}"
+                  for kind in ('failure', 'error'):
+                      for el in case.findall(kind):
+                          frames = [l.strip() for l in (el.text or '').splitlines() if 'vantraya' in l][:4]
+                          problems.append(('error', name, (el.get('message') or el.get('type') or '?') + '\n' + '\n'.join(frames)))
+                  for el in case.findall('skipped'):
+                      problems.append(('warning', 'skipped: ' + name, el.get('message') or 'no reason given'))
           print(f"::notice title=Tests::{total} tests ran: {failures} failures, {errors} errors, {skipped} skipped - " + "; ".join(lines))
+          for level, title, detail in problems[:9]:
+              print(f"::{level} title={esc(title, True)}::{esc(detail[:3500])}")
           if total == 0:
               print("::error title=Tests::no test results were found - the tests did not run")
               raise SystemExit(1)

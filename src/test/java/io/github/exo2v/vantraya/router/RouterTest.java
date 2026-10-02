@@ -16,7 +16,6 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -282,6 +281,27 @@ public class RouterTest {
     }
 
     /**
+     * Where the shipped density functions are on disk. Normally the class path says so; under NeoForge's unit-test
+     * launcher the resources are not served from a plain {@code file:} directory, so fall back to the source tree
+     * above the working directory. If neither is found the guard fails: a guard that silently skips guards nothing
+     * (it did exactly that for one CI run).
+     */
+    private static Path densityFunctionDirectory() throws Exception {
+        URL dir = RouterTest.class.getResource("/data/vantraya_builder/worldgen/density_function");
+        if (dir != null && "file".equals(dir.getProtocol())) {
+            return Paths.get(dir.toURI());
+        }
+        for (Path p = Paths.get("").toAbsolutePath(); p != null; p = p.getParent()) {
+            Path candidate = p.resolve("src/main/resources/data/vantraya_builder/worldgen/density_function");
+            if (Files.isDirectory(candidate)) {
+                return candidate;
+            }
+        }
+        throw new AssertionError("cannot find the shipped density functions (class path says " + dir
+                + ", working directory " + Paths.get("").toAbsolutePath() + ")");
+    }
+
+    /**
      * Terrain overhauls (Lithosphere, Tectonic, ...) override vanilla density functions. The shape of this world's
      * terrain must not depend on any function they might replace - that would move the landmark pins - so the
      * terrain's own functions reference nothing in the minecraft namespace but the Y coordinate, and the router
@@ -289,9 +309,7 @@ public class RouterTest {
      */
     @Test
     public void terrainDependsOnNoVanillaFunctionAnotherPackCouldOverride() throws Exception {
-        URL dir = RouterTest.class.getResource("/data/vantraya_builder/worldgen/density_function");
-        Assume.assumeTrue("resources are a plain directory", dir != null && "file".equals(dir.getProtocol()));
-        Path root = Paths.get(dir.toURI());
+        Path root = densityFunctionDirectory();
         List<Path> files;
         try (Stream<Path> walk = Files.walk(root)) {
             files = walk.filter(f -> f.toString().endsWith(".json")).collect(Collectors.toList());
