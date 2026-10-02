@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -92,8 +93,12 @@ class InEngineWorldgenTest {
         return presets.getHolderOrThrow(ResourceKey.create(Registries.WORLD_PRESET, VantrayaBuilder.id("vantraya"))).value();
     }
 
+    private static Map<ResourceKey<LevelStem>, LevelStem> dimensions(MinecraftServer server) {
+        return preset(server).createWorldDimensions().dimensions();
+    }
+
     private static LevelStem overworld(MinecraftServer server) {
-        LevelStem stem = preset(server).dimensions().get(LevelStem.OVERWORLD);
+        LevelStem stem = dimensions(server).get(LevelStem.OVERWORLD);
         assertNotNull(stem, "the preset defines an overworld");
         return stem;
     }
@@ -204,8 +209,8 @@ class InEngineWorldgenTest {
         assertEquals(MIN_Y, type.minY());
         assertEquals(HEIGHT, type.height());
         assertEquals(HEIGHT, type.logicalHeight());
-        assertTrue(preset(server).dimensions().containsKey(LevelStem.NETHER), "the Nether is still there");
-        assertTrue(preset(server).dimensions().containsKey(LevelStem.END), "the End is still there");
+        assertTrue(dimensions(server).containsKey(LevelStem.NETHER), "the Nether is still there");
+        assertTrue(dimensions(server).containsKey(LevelStem.END), "the End is still there");
         assertEquals(63, generator(server).generatorSettings().value().seaLevel(), "water fills through Y=62");
     }
 
