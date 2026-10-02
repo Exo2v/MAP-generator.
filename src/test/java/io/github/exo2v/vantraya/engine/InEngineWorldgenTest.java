@@ -352,11 +352,43 @@ class InEngineWorldgenTest {
     @Test
     void theSpecificationVerifiesOnTheRealEngineForSeveralWorldSeeds(MinecraftServer server) {
         VantrayaChunkGenerator gen = generator(server);
+        List<String> problems = new ArrayList<>(); // all seeds, so one run tells everything
         for (long seed : new long[] {0L, 20250929L, -987654321L, 4242L}) {
-            List<SpecVerifier.Check> checks = SpecVerifier.run(engineProbe(gen, randomState(server, gen, seed)));
+            RandomState rs = randomState(server, gen, seed);
+            List<SpecVerifier.Check> checks = SpecVerifier.run(engineProbe(gen, rs));
             assertTrue(checks.size() >= 20, "the verifier ran only " + checks.size() + " checks");
-            assertTrue(SpecVerifier.allPass(checks), "world seed " + seed + ": " + failures(checks));
+            for (SpecVerifier.Check c : checks) {
+                if (!c.pass()) {
+                    problems.add("seed " + seed + ": " + c + diagnosis(gen, rs, c));
+                }
+            }
         }
+        assertTrue(problems.isEmpty(), "\n" + String.join("\n", problems));
+    }
+
+    /**
+     * For a failed landmark check: what the engine and the model each say at the landmark's centre column and the ring
+     * around it (engine top Y / model height, the model sampled at the integer column as the density function does).
+     */
+    private static String diagnosis(VantrayaChunkGenerator gen, RandomState rs, SpecVerifier.Check c) {
+        for (Spec.Landmark lm : Spec.LANDMARKS) {
+            if (!lm.name().equals(c.landmark()) || !c.what().contains("centre")) {
+                continue;
+            }
+            VantrayaModel model = gen.model(rs);
+            VantrayaModel.Fields f = model.sample(lm.x(), lm.z());
+            StringBuilder sb = new StringBuilder(String.format(java.util.Locale.ROOT,
+                    "\n    centre (%d,%d): model H=%.2f (at +0.5: %.2f) rough3d=%.2f pin=%.2f; engine/model per column:",
+                    (int) lm.x(), (int) lm.z(), f.height(), model.height(lm.x() + 0.5, lm.z() + 0.5), f.rough3d(), f.pin()));
+            for (int[] d : new int[][] {{0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}, {2, 2}, {2, -2}, {-2, 2}, {-2, -2}}) {
+                int x = (int) lm.x() + d[0];
+                int z = (int) lm.z() + d[1];
+                sb.append(String.format(java.util.Locale.ROOT, " (%d,%d)=%d/%.1f", d[0], d[1],
+                        gen.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, LEVEL, rs) - 1, model.sample(x, z).height()));
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     @Test
