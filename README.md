@@ -51,6 +51,16 @@ python generate_ashfall.py --out both --cell 4               # both, one pass
 A generated build of all of the above is checked in at [`assets/ashenfall/`](assets/ashenfall/), so the map's build layers can be taken straight
 into WorldPainter without running anything.
 
+**Downloadable world.** The same continent as a ready-to-play save is published in
+[`release/ashenfall-world/`](release/ashenfall-world/): the full 8,000 x 8,000 world, written
+as 250,000 chunks at chunk status `minecraft:features`, split into ZIP shards because GitHub
+refuses single files over 100 MB.  Extract all the shards into
+`.minecraft/saves/Ashenfall` and the world is complete; see
+[the install notes](release/ashenfall-world/README.md).  The shards are published from
+[`tools/pack_world_download.py`](tools/pack_world_download.py), which as the export runs
+watches for finished region files and pushes a shard to the branch as soon as one fills up -
+so a two-hour build survives an interruption with only its last few minutes missing.
+
 The nine cardinal landmarks sit at their specified coordinates and elevations - The
 Forgotten Coast (spawn) `(0, 68, 2500)`, the Cogwork March `(-2100, 0)`, the Ashen Caldera
 `(0, 0)` with its 146-block rim and 92-block Obsidian Throne, the Solitary Glacial Spine
@@ -71,8 +81,11 @@ python3 -m mg.cli presets                                                # inclu
 ```
 
 A full-resolution build (cell size 4 -> 4,000,000 simulation cells, 250,000 chunks) takes
-roughly ten minutes to generate and forty to export on two cores; `export.resume` is on,
-so an interrupted export continues from the chunks already written.
+about ten minutes to generate; the export is the long pole at roughly 30 chunks per second on
+two cores, so budget around two hours for the continent.  `export.resume` is on, so an
+interrupted export continues from the chunks already written, and a region file is only
+flushed in batches of unwritten chunks rather than once per chunk (that fix alone took a
+1,024 x 1,024 slice from 51 s to 34 s).
 
 Two details of the build are worth knowing, because both are places where the specification
 and a naive terrain generator disagree:
