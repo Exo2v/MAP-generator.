@@ -23,7 +23,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # compiles against NeoForge 1.21.1, runs the specification tests (landmark pins, Java-vs-Python parity, the
-      # noise-router checks) and assembles the mod jar
+      # noise-router checks) and the in-engine tests (the world type loaded and driven by the real game on an
+      # in-memory server - no dedicated server, no EULA), and assembles the mod jar
       - name: Build and test
         timeout-minutes: 14
         run: |

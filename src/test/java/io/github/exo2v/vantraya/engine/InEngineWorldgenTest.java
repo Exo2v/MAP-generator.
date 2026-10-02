@@ -83,9 +83,9 @@ import net.neoforged.testframework.junit.EphemeralTestServerProvider;
  * through {@code fillFromNoise}, the biome source against the real {@code Climate.Sampler}, the codec round
  * trip that saving {@code level.dat} performs.
  *
- * <p>The ephemeral server's own overworld is an empty void world that exists only to load data; it is not
- * touched. What this class cannot reach is a player in a world: the vanilla surface rule pass
- * ({@code buildSurface} needs a {@code WorldGenRegion}), feature decoration, spawning.
+ * <p>The ephemeral server loads data but no levels at all ({@code server.overworld()} is null), so nothing here
+ * touches a world. What this class cannot reach is a player in a world: the vanilla surface rule pass
+ * ({@code buildSurface} needs a {@code WorldGenRegion}), feature decoration, structures, spawning.
  */
 @ExtendWith(EphemeralTestServerProvider.class)
 @Timeout(value = 4, unit = TimeUnit.MINUTES) // a safety net per test; start-up has its own, shorter deadline below

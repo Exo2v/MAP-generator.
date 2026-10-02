@@ -42,7 +42,7 @@ If you want a Vantraya-flavoured region of an otherwise Lithosphere or Tectonic 
 | biome source | `vantraya_builder:vantraya` | Still Life's/other biome sources don't run; their biomes join through role tags |
 | density functions | `vantraya_builder:field/*`, `depth`, `sloped_cheese` | other packs may *reference* them (§7) |
 | 3D roughness noise | `vantraya_builder:base_3d_noise` — a copy of vanilla's `minecraft:overworld/base_3d_noise` | a pack that overrides the vanilla function cannot change the terrain's roughness, so the pinned elevations hold (`RouterTest` fails if a terrain function starts referencing a vanilla one) |
-| cave functions | vanilla's, **by id** (`minecraft:overworld/caves/*`) | deliberately shared: a cave overhaul that overrides those functions applies in Vantraya worlds too (*inferred*, untested) |
+| cave functions | vanilla's, **by id** (`minecraft:overworld/caves/*`) | deliberately shared: a cave overhaul that overrides those functions applies in Vantraya worlds too (*inferred*, untested) — except that within 64 blocks of a landmark centre the surface cave entrances and noodle tunnels are switched off (the `protect` channel, DESIGN.md §4), whatever pack supplies them; caves underground are unaffected |
 | mixins / access transformers | **none** | only public API; nothing here can break another mod's mixin target |
 
 The one surface that **is** shared is the dimension's *key*: a Vantraya world's overworld is still `minecraft:overworld` (the preset replaces what sits under that key), the Nether and End are vanilla. Anything keyed to the overworld level stem, to vanilla biome IDs/tags, or to vanilla structure sets therefore sees a normal Overworld.

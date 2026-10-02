@@ -6,7 +6,7 @@ A NeoForge mod for **Minecraft 1.21.1** that builds the continent of **Vantyra**
 
 It is built to run **alongside** the worldgen mods in the pack — Lithosphere, Still Life, Tectonic, Lithostitched — see [how that works](#working-alongside-lithosphere-still-life-and-tectonic).
 
-> **Status.** The specification model is complete and heavily tested (79 tests, including a numeric cross-check against the offline Python generator this was ported from). **The whole mod compiles against the real NeoForge 21.1.176 / Minecraft 1.21.1 jars and all 79 tests pass in GitHub Actions** ([run](https://github.com/Exo2v/MAP-generator./actions/runs/37040304696); the workflow also uploads the mod jar as a build artifact). **It has not yet been run in a game**: nothing in this repository has started Minecraft with the Vantraya world type. The first thing to do is create a world with it and run `/vantraya verify`. See [Status and known limits](#status-and-known-limits).
+> **Status.** The specification model is complete and heavily tested, and the mod now **runs inside the real game engine** in CI. GitHub Actions compiles it against the real NeoForge 21.1.176 / Minecraft 1.21.1 jars and runs **94 tests, all passing** ([run](https://github.com/Exo2v/MAP-generator./actions/runs/37054994965)): 81 plain JUnit tests (the spec tables, a numeric cross-check against the offline Python generator this was ported from, the shipped noise-router JSON evaluated by an independent interpreter) and **13 that start Minecraft** — an in-memory server whose data is loaded by the game's own loader — and check the Vantraya world type there: the preset on the creation screen's list, the density functions, the generator and biome source, real generated chunks at every landmark, the specification's own verification on eight world seeds. The workflow also uploads the mod jar as a build artifact. **It has not been played**: nobody has opened the world creation screen, picked the preset and walked around, and none of the companion mods was available to test with. The first thing to do is create a world with it and run `/vantraya verify`. See [Status and known limits](#status-and-known-limits).
 
 ## Using it
 
@@ -18,7 +18,7 @@ Existing worlds cannot be converted; the generator is chosen when a world is cre
 
 ## What the world is
 
-The data below is the specification (`HANDOFF.md` §3, the master specification PDF) — pinned by unit tests, and every ground-level centre is generated at *exactly* its specified Y for every seed.
+The data below is the specification (`HANDOFF.md` §3, the master specification PDF) — pinned by unit tests, and every ground-level centre is generated at *exactly* its specified Y for every seed — in the model, through the shipped noise-router JSON, and by the real game engine (see [Status](#status-and-known-limits)).
 
 | # | Landmark | Centre (x, y, z) | Box (x · z) | Y band | Biomes |
 |---|----------|------------------|-------------|--------|--------|
@@ -87,7 +87,7 @@ Requires JDK 21.
 ./gradlew runServer      # dev server
 ```
 
-CI (`.github/workflows/build.yml`) does `./gradlew build` and uploads the jar. The specification model (`io.github.exo2v.vantraya.core`) is plain Java without any Minecraft dependency, so its tests also run with a bare JDK and JUnit 4.
+CI (`.github/workflows/build.yml`) does `./gradlew build` and uploads the jar. The specification model (`io.github.exo2v.vantraya.core`) is plain Java without any Minecraft dependency, so its tests also run with a bare JDK and JUnit 4. The in-engine tests (`src/test/java/.../engine`) need the real game jars, so they run only under Gradle (`./gradlew test`); they start an in-memory server — no Minecraft EULA, no world on disk.
 
 ## Repository layout
 
@@ -98,7 +98,7 @@ src/main/java/io/github/exo2v/vantraya/
   mc/     the thin Minecraft layer: VantrayaField (density function), VantrayaChunkGenerator,
           VantrayaBiomeSource, SurfacePainter, CalderaFluids, VantrayaCommand, config, spawn
 src/main/resources/data/vantraya_builder/   world preset, noise settings, density functions, dimension type, biome role tags
-src/test/        67 + 12 tests (spec tables, Java-vs-Python parity, model invariants, router JSON evaluation)
+src/test/        67 + 14 + 13 tests (spec tables, Java-vs-Python parity, model invariants, router JSON evaluation, in-engine world type)
 scripts/generate_data.py   regenerates the worldgen JSON from vanilla 1.21.1 data
 docs/            DESIGN.md · COMPATIBILITY.md · SPEC_NOTES.md · img/
 HANDOFF.md, *.pdf, *.md      the specification documents this implements
@@ -114,12 +114,17 @@ HANDOFF.md, *.pdf, *.md      the specification documents this implements
 
 **Verified by CI** (GitHub Actions, `./gradlew build` on Ubuntu with JDK 21)
 
-* The Minecraft-facing classes compile against the real NeoForge 21.1.176 jars, and the mod jar is assembled. (Before CI was reachable they had only been type-checked against hand-written API stubs.)
-* The 79 JUnit tests pass there too.
+* The Minecraft-facing classes compile against the real NeoForge 21.1.176 jars, and the mod jar is assembled.
+* All 94 tests pass: the 81 plain JUnit tests, and **13 that run inside the real game engine** (NeoForge's `unitTest` environment with its ephemeral server — an in-memory `MinecraftServer` whose data is loaded by Minecraft's own `WorldLoader`; nothing is written to disk, no server is started, no EULA is involved). Those check, on the real engine:
+  * the codecs and registries are registered; the Vantraya preset loads, is in `#minecraft:normal` (the creation screen's list), and its dimension, noise settings, density functions and biome role tags all load; the dimension survives the encode → decode round trip that saving `level.dat` performs; the `/vantraya` command tree is registered;
+  * **the specification's own verification (`SpecVerifier`, 22 checks) passes on the live density-function engine for eight different world seeds**, and the world seed reaches the density functions;
+  * real chunks from `fillFromNoise` at all nine landmarks: ground within ±1 of the specified Y, rock to the bottom, air at the build limit; the Obsidian Throne is obsidian; the Caldera holds no open water and gets lava on its floor; steep faces keep no soil; the abyss is deep sea;
+  * the biome source, driven by the real `Climate.Sampler`, places a specified biome at every landmark centre.
+* What running it that way found and fixed: terrain 2–4 blocks too high at landmark centres (vanilla's density bend interpolated upward — see [DESIGN §4](docs/DESIGN.md#4-how-minecraft-is-made-to-build-it)); the slope-aware surface table and the Caldera's lava being applied one block too low; a vanilla cave entrance opening a 17-block pit in the Hermit's Spire's pinned top (landmark centres are now kept free of surface cave entrances); and a server-start NPE that could only happen on a server with no levels.
 
 **Not verified — please check on first run**
 
-* **Behaviour in game.** Nothing here has run inside Minecraft: the world preset, codecs, density functions and chunk generator have been *compiled* and their JSON *evaluated by an independent interpreter in tests*, but not yet loaded by the game itself. `/vantraya verify` is the first thing to run in a new Vantraya world; if the world fails to load, the log lines starting with `Vantraya:` and the first exception are what is needed.
+* **Play.** The in-engine tests cannot reach a player in a world: the vanilla surface-rule pass (`buildSurface` needs a `WorldGenRegion`; the painter is called directly instead), feature decoration, structure placement, mob spawning, the world creation *screen* (client UI) and the spawn placement are untested, and `/vantraya` is checked to be registered, not executed. `/vantraya verify` is the first thing to run in a new Vantraya world; if the world fails to load, the log lines starting with `Vantraya:` and the first exception are what is needed.
 * **Interaction with the companion mods** has been designed for, not tested — none of them could be downloaded in my environment.
 
 **Deliberate differences from the offline generator** (and from the documents): see [`docs/DESIGN.md`](docs/DESIGN.md#5-what-is-different-from-the-offline-generator-and-why) and [`docs/SPEC_NOTES.md`](docs/SPEC_NOTES.md) — the global stages (erosion, hydrology, rain shadow) are replaced by local equivalents, a few specification ambiguities were resolved with documented defaults, and not-yet-specified things (structures, the giant fungal trees) are left to the mods, as in the handoff.
