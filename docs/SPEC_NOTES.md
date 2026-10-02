@@ -107,5 +107,5 @@ The handoff's own rule is **"if a specification datapoint is missing or ambiguou
 
 ## D. Not verified
 
-* **Nothing here has run inside Minecraft.** The numeric model is verified against the Python engine (DESIGN.md §8); the Minecraft layer was type-checked against hand-written API stubs. First steps: `./gradlew build`, then `/vantraya verify` in a new world.
+* **Nothing here has run inside Minecraft.** The numeric model is verified against the Python engine (DESIGN.md §8); the whole mod compiles against the real NeoForge 21.1.176 jars and the 79 tests pass in GitHub Actions. First step: create a world with the Vantraya type and run `/vantraya verify`.
 * Entries A2 and A5 are the two places where the live world deliberately differs from the offline export at the *geometry* level; A1, A7 and A8 differ at the *surface* level only. Everything else matches the offline engine to the tolerances in DESIGN.md §8.

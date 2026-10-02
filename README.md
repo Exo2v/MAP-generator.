@@ -6,7 +6,7 @@ A NeoForge mod for **Minecraft 1.21.1** that builds the continent of **Vantyra**
 
 It is built to run **alongside** the worldgen mods in the pack — Lithosphere, Still Life, Tectonic, Lithostitched — see [how that works](#working-alongside-lithosphere-still-life-and-tectonic).
 
-> **Status.** The specification model is complete and heavily tested (79 tests, including a numeric cross-check against the offline Python generator this was ported from). The Minecraft-facing layer follows real 1.21.1 NeoForge patterns but **has not yet been compiled against Minecraft or run in-game** — my build environment could not reach the Minecraft/NeoForge servers. The first thing to do is `./gradlew build` (or let the included GitHub Action do it) and then `/vantraya verify` in a new world. See [Status and known limits](#status-and-known-limits).
+> **Status.** The specification model is complete and heavily tested (79 tests, including a numeric cross-check against the offline Python generator this was ported from). **The whole mod compiles against the real NeoForge 21.1.176 / Minecraft 1.21.1 jars and all 79 tests pass in GitHub Actions** ([run](https://github.com/Exo2v/MAP-generator./actions/runs/37040304696); the workflow also uploads the mod jar as a build artifact). **It has not yet been run in a game**: nothing in this repository has started Minecraft with the Vantraya world type. The first thing to do is create a world with it and run `/vantraya verify`. See [Status and known limits](#status-and-known-limits).
 
 ## Using it
 
@@ -112,11 +112,15 @@ HANDOFF.md, *.pdf, *.md      the specification documents this implements
 * Every ground-level landmark centre is at exactly its specified Y — for the canonical seed and six others — both in the model and through the shipped noise-router JSON evaluated by an independent interpreter (`RouterTest`).
 * The world type's JSON is internally consistent (all references resolve; presets, tags and biome role tags match the code).
 
+**Verified by CI** (GitHub Actions, `./gradlew build` on Ubuntu with JDK 21)
+
+* The Minecraft-facing classes compile against the real NeoForge 21.1.176 jars, and the mod jar is assembled. (Before CI was reachable they had only been type-checked against hand-written API stubs.)
+* The 79 JUnit tests pass there too.
+
 **Not verified — please check on first run**
 
-* **Compilation against the real Minecraft/NeoForge jars.** The Minecraft-facing classes were type-checked against hand-written stubs of exactly the signatures they use, each cross-checked against real 1.21.1 mod sources; a real build may still surface a small API mismatch.
-* **Behaviour in game.** Nothing here ran inside Minecraft. `/vantraya verify` is the first thing to run.
-* **Interaction with the companion mods** has been designed for, not tested — none of them can be downloaded in my environment.
+* **Behaviour in game.** Nothing here has run inside Minecraft: the world preset, codecs, density functions and chunk generator have been *compiled* and their JSON *evaluated by an independent interpreter in tests*, but not yet loaded by the game itself. `/vantraya verify` is the first thing to run in a new Vantraya world; if the world fails to load, the log lines starting with `Vantraya:` and the first exception are what is needed.
+* **Interaction with the companion mods** has been designed for, not tested — none of them could be downloaded in my environment.
 
 **Deliberate differences from the offline generator** (and from the documents): see [`docs/DESIGN.md`](docs/DESIGN.md#5-what-is-different-from-the-offline-generator-and-why) and [`docs/SPEC_NOTES.md`](docs/SPEC_NOTES.md) — the global stages (erosion, hydrology, rain shadow) are replaced by local equivalents, a few specification ambiguities were resolved with documented defaults, and not-yet-specified things (structures, the giant fungal trees) are left to the mods, as in the handoff.
 
