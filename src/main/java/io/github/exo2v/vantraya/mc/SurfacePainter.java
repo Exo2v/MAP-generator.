@@ -38,17 +38,25 @@ public final class SurfacePainter {
         if (s == null) {
             s = new BlockState[Mat.values().length];
             for (Mat mat : Mat.values()) {
+                // Registry.get(id) answers air for an unknown id, which would silently paint holes: fail instead
                 s[mat.ordinal()] = BuiltInRegistries.BLOCK
-                        .get(ResourceLocation.withDefaultNamespace(mat.path())).defaultBlockState();
+                        .getOptional(ResourceLocation.withDefaultNamespace(mat.path()))
+                        .orElseThrow(() -> new IllegalStateException("Vantraya: no block minecraft:" + mat.path()))
+                        .defaultBlockState();
             }
             states = s;
         }
         return s[m.ordinal()];
     }
 
-    /** Y of the top solid block of a column (the ground, ignoring any water above it). */
+    /**
+     * Y of the top solid block of a column (the ground, ignoring any water above it). {@code ChunkAccess.getHeight}
+     * already returns exactly that - the heightmap's first free Y, minus one - so nothing is subtracted here. (An
+     * earlier version subtracted one more, and every pass below acted one block too low: the surface table was
+     * painted under the top block, and the caldera's lava was poured into solid rock. The in-engine test found it.)
+     */
     static int groundY(ChunkAccess chunk, int dx, int dz) {
-        return chunk.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, dx, dz) - 1;
+        return chunk.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, dx, dz);
     }
 
     public static void paint(ChunkAccess chunk, VantrayaModel model) {

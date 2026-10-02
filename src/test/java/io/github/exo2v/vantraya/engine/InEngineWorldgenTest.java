@@ -283,6 +283,15 @@ class InEngineWorldgenTest {
         assertTrue(BuiltInRegistries.BIOME_SOURCE.containsKey(VantrayaBuilder.id("vantraya")), "biome source");
     }
 
+    @Test
+    void everySurfaceMaterialIsARealBlock() {
+        for (io.github.exo2v.vantraya.core.SurfaceLogic.Mat m : io.github.exo2v.vantraya.core.SurfaceLogic.Mat.values()) {
+            ResourceLocation id = ResourceLocation.withDefaultNamespace(m.path());
+            assertTrue(BuiltInRegistries.BLOCK.containsKey(id), "the surface table names a block that does not exist: " + id);
+            assertFalse(BuiltInRegistries.BLOCK.get(id).defaultBlockState().isAir(), id + " is air");
+        }
+    }
+
     // ---- the data, loaded by Minecraft's own loader ---------------------------------------------------
 
     @Test
@@ -534,7 +543,8 @@ class InEngineWorldgenTest {
         RandomState rs = randomState(server, gen, 777L);
         ProtoChunk chunk = fill(gen, rs, biomes, 3750 >> 4, 0);
         int g = groundNear(chunk, 3750, 0);
-        assertTrue(g >= Spec.ABYSS_FLOOR - 2 && g <= Spec.TRENCH_TOP + 2, "abyss floor Y " + g);
+        double pad = SpecVerifier.BAND_PAD * (Spec.TRENCH_TOP - Spec.ABYSS_FLOOR);
+        assertTrue(g >= Spec.ABYSS_FLOOR - pad && g <= Spec.TRENCH_TOP + pad, "abyss floor Y " + g);
         assertTrue(chunk.getBlockState(new BlockPos(3750, 50, 0)).is(Blocks.WATER), "water above the abyss floor");
     }
 }

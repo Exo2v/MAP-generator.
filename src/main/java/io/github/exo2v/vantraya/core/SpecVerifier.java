@@ -36,6 +36,13 @@ public final class SpecVerifier {
     /** Tolerance, in blocks, around an exact specified elevation (the ground is a whole block). */
     public static final double CENTRE_TOLERANCE = 1.0;
 
+    /**
+     * HANDOFF 9.4: the offline verifier runs with {@code --pad 0.25}, "the fraction of each elevation band allowed as
+     * tolerance". The Veil's band is the abyss floor to the trench top (-32..10), so a quarter of it is 10.5 blocks.
+     * (The landmark centres are held to a far tighter {@link #CENTRE_TOLERANCE}.)
+     */
+    public static final double BAND_PAD = 0.25;
+
     public static List<Check> run(Probe p) {
         List<Check> out = new ArrayList<>();
         for (Landmark lm : Spec.LANDMARKS) {
@@ -83,8 +90,10 @@ public final class SpecVerifier {
             veilLo = Math.min(veilLo, g);
             veilHi = Math.max(veilHi, g);
         }
-        out.add(check(Spec.VEIL.name(), "abyss floor within -32..10 beyond r = 3550",
-                veilLo >= Spec.ABYSS_FLOOR - 2 && veilHi <= Spec.TRENCH_TOP + 2, "ground Y %d..%d at r=3750", veilLo, veilHi));
+        double pad = BAND_PAD * (Spec.TRENCH_TOP - Spec.ABYSS_FLOOR);
+        out.add(check(Spec.VEIL.name(), "abyss floor within -32..10 (+25% pad) beyond r = 3550",
+                veilLo >= Spec.ABYSS_FLOOR - pad && veilHi <= Spec.TRENCH_TOP + pad,
+                "ground Y %d..%d at r=3750, allowed %.1f..%.1f", veilLo, veilHi, Spec.ABYSS_FLOOR - pad, Spec.TRENCH_TOP + pad));
         return out;
     }
 
