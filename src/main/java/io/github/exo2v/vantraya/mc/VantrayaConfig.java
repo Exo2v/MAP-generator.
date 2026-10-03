@@ -39,6 +39,11 @@ public final class VantrayaConfig {
             .comment("Log which worldgen mods and biome contributions Vantraya found when a server starts.")
             .define("logCompatReport", true);
 
+    public static final ModConfigSpec.BooleanValue PRESELECT_WORLD_TYPE = BUILDER
+            .comment("Client side: open the Create New World screen with the Vantraya world type already selected,",
+                    "instead of \"Default\". It can still be switched back there. Meant for a modpack built around this world.")
+            .define("preselectWorldType", false);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private static boolean read(ModConfigSpec.BooleanValue v, boolean fallback) {
@@ -71,5 +76,9 @@ public final class VantrayaConfig {
 
     public static boolean logCompatReport() {
         return read(LOG_COMPAT_REPORT, true);
+    }
+
+    public static boolean preselectWorldType() {
+        return read(PRESELECT_WORLD_TYPE, false);
     }
 }

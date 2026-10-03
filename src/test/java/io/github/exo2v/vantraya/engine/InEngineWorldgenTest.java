@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import com.google.gson.JsonElement;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
+import com.mojang.serialization.Lifecycle;
 
 import io.github.exo2v.vantraya.VantrayaBuilder;
 import io.github.exo2v.vantraya.core.BiomeLogic;
@@ -37,11 +41,15 @@ import io.github.exo2v.vantraya.mc.CalderaFluids;
 import io.github.exo2v.vantraya.mc.SurfacePainter;
 import io.github.exo2v.vantraya.mc.VantrayaBiomeSource;
 import io.github.exo2v.vantraya.mc.VantrayaChunkGenerator;
+import io.github.exo2v.vantraya.mc.WorldTypePriority;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
+import net.minecraft.core.MappedRegistry;
 import net.minecraft.core.QuartPos;
+import net.minecraft.core.RegistrationInfo;
 import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.RegistryOps;
@@ -55,18 +63,25 @@ import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.Climate;
+import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.presets.WorldPreset;
+import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
@@ -345,6 +360,111 @@ class InEngineWorldgenTest {
         for (String sub : new String[] {"info", "where", "locate", "tp", "verify", "biomes"}) {
             assertNotNull(root.getChild(sub), "/vantraya " + sub);
         }
+    }
+
+    // ---- a data pack that ships its own overworld ---------------------------------------------------------
+    //
+    // The first real game showed it: the player picked Vantraya and got the overworld of Lithosphere and Still Life.
+    // A data pack's data/minecraft/dimension/overworld.json beats the world type in WorldDimensions.bake, and a mod
+    // that replaces the overworld ships exactly that file. WorldTypePriority (through WorldDimensionsMixin) is the fix.
+
+    private static ChunkGenerator somePacksOverworld(MinecraftServer server) {
+        RegistryAccess access = server.registryAccess();
+        return new NoiseBasedChunkGenerator(
+                new FixedBiomeSource(access.registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS)),
+                access.registryOrThrow(Registries.NOISE_SETTINGS).getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD));
+    }
+
+    /** What the dimension JSON files of the data packs become: a registry of level stems. */
+    private static Registry<LevelStem> dataPackStems(MinecraftServer server, Map<ResourceKey<LevelStem>, ChunkGenerator> generators) {
+        Registry<DimensionType> types = server.registryAccess().registryOrThrow(Registries.DIMENSION_TYPE);
+        MappedRegistry<LevelStem> stems = new MappedRegistry<>(Registries.LEVEL_STEM, Lifecycle.stable());
+        generators.forEach((key, generator) -> {
+            ResourceKey<DimensionType> type = key.equals(LevelStem.NETHER) ? BuiltinDimensionTypes.NETHER : BuiltinDimensionTypes.OVERWORLD;
+            stems.register(key, new LevelStem(types.getHolderOrThrow(type), generator), RegistrationInfo.BUILT_IN);
+        });
+        return stems.freeze();
+    }
+
+    private static WorldDimensions defaultWorldType(MinecraftServer server) {
+        return server.registryAccess().registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(WorldPresets.NORMAL).value().createWorldDimensions();
+    }
+
+    @Test
+    void inVanillaADataPacksOverworldBeatsTheWorldTypeThePlayerPicked(MinecraftServer server) {
+        // The control, with no Vantraya in it: the player picks "Default" and a pack ships its own overworld. This is
+        // the rule that switched Vantraya off in the first real game.
+        ChunkGenerator pack = somePacksOverworld(server);
+        WorldDimensions chosen = defaultWorldType(server);
+        assertNotSame(pack, chosen.dimensions().get(LevelStem.OVERWORLD).generator(), "test set-up");
+
+        WorldDimensions.Complete baked = chosen.bake(dataPackStems(server, Map.of(LevelStem.OVERWORLD, pack)));
+
+        assertSame(pack, baked.dimensions().get(LevelStem.OVERWORLD).generator(),
+                "vanilla: the pack's overworld replaces that of the world type that was picked");
+    }
+
+    @Test
+    void theVantrayaWorldTypeKeepsItsOverworldWhenADataPackShipsAnother(MinecraftServer server) {
+        ChunkGenerator packOverworld = somePacksOverworld(server);
+        ChunkGenerator packNether = somePacksOverworld(server);
+        WorldDimensions chosen = preset(server).createWorldDimensions();
+
+        WorldDimensions.Complete baked = chosen.bake(
+                dataPackStems(server, Map.of(LevelStem.OVERWORLD, packOverworld, LevelStem.NETHER, packNether)));
+
+        LevelStem overworld = baked.dimensions().get(LevelStem.OVERWORLD);
+        assertTrue(overworld.generator() instanceof VantrayaChunkGenerator,
+                "the overworld is Vantraya's, not " + overworld.generator().getClass().getName()
+                        + " - is WorldDimensionsMixin applied in this environment?");
+        assertTrue(overworld.generator().getBiomeSource() instanceof VantrayaBiomeSource);
+        assertEquals(HEIGHT, overworld.type().value().height(), "and so is its dimension type");
+        assertSame(packNether, baked.dimensions().get(LevelStem.NETHER).generator(),
+                "only the Vantraya overworld is protected: a pack's Nether still wins, as in vanilla");
+        assertNotNull(baked.dimensions().get(LevelStem.END), "the End is still there");
+    }
+
+    @Test
+    void theGuardHoldsWhenTheWorldIsLoadedAgainFromLevelDat(MinecraftServer server) {
+        // Loading a saved world merges the dimensions decoded from level.dat with the data packs' the same way.
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+        JsonElement saved = LevelStem.CODEC.encodeStart(ops, overworld(server)).result().orElseThrow();
+        LevelStem loaded = LevelStem.CODEC.parse(ops, saved).result().orElseThrow();
+        WorldDimensions fromLevelDat = new WorldDimensions(Map.of(LevelStem.OVERWORLD, loaded));
+
+        WorldDimensions.Complete baked = fromLevelDat.bake(dataPackStems(server, Map.of(LevelStem.OVERWORLD, somePacksOverworld(server))));
+
+        assertTrue(baked.dimensions().get(LevelStem.OVERWORLD).generator() instanceof VantrayaChunkGenerator,
+                "a reloaded Vantraya world must stay a Vantraya world");
+    }
+
+    @Test
+    void aPackThatConfiguresVantrayaItselfStillWins(MinecraftServer server) {
+        VantrayaChunkGenerator base = generator(server);
+        VantrayaChunkGenerator configured = new VantrayaChunkGenerator(base.getBiomeSource(), base.generatorSettings());
+
+        WorldDimensions.Complete baked = preset(server).createWorldDimensions()
+                .bake(dataPackStems(server, Map.of(LevelStem.OVERWORLD, configured)));
+
+        assertSame(configured, baked.dimensions().get(LevelStem.OVERWORLD).generator(),
+                "a data pack that deliberately defines a Vantraya overworld is left to win");
+    }
+
+    @Test
+    void theGuardLeavesEverythingElseAlone(MinecraftServer server) {
+        // Called directly, so this holds even where the mixin is not applied.
+        Registry<LevelStem> packs = dataPackStems(server, Map.of(LevelStem.OVERWORLD, somePacksOverworld(server)));
+        Registry<LevelStem> noPackOverworld = dataPackStems(server, Map.of(LevelStem.NETHER, somePacksOverworld(server)));
+
+        assertNull(WorldTypePriority.keepChosenOverworld(dimensions(server), packs).get(LevelStem.OVERWORLD),
+                "Vantraya chosen: the pack's overworld is left out of the merge");
+        assertSame(packs, WorldTypePriority.keepChosenOverworld(defaultWorldType(server).dimensions(), packs),
+                "another world type chosen: vanilla's rule, untouched");
+        assertSame(noPackOverworld, WorldTypePriority.keepChosenOverworld(dimensions(server), noPackOverworld),
+                "no pack overworld: nothing to do");
+        assertNotNull(WorldTypePriority.keepChosenOverworld(dimensions(server),
+                dataPackStems(server, Map.of(LevelStem.OVERWORLD, somePacksOverworld(server), LevelStem.NETHER, somePacksOverworld(server))))
+                .get(LevelStem.NETHER), "the pack's Nether is kept");
     }
 
     // ---- the terrain on the real density-function engine -----------------------------------------------

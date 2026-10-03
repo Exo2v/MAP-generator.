@@ -12,6 +12,11 @@ displayURL="https://github.com/Exo2v/MAP-generator."
 authors="${mod_authors}"
 description='''${mod_description}'''
 
+# One small mixin (WorldDimensionsMixin): it keeps the Vantraya world type's overworld from being replaced by a data
+# pack's own minecraft:overworld dimension - see docs/COMPATIBILITY.md.
+[[mixins]]
+config="vantraya_builder.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

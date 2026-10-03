@@ -96,6 +96,10 @@ jobs:
           unzip -l "$jar" > /tmp/jar.txt
           unzip -Z1 "$jar" | sort > /tmp/in-jar.txt
           unzip -p "$jar" META-INF/neoforge.mods.toml > /tmp/mods.toml
+          if ! grep -q 'vantraya_builder.mixins.json' /tmp/mods.toml; then
+            echo "::error title=Jar::neoforge.mods.toml does not register the mixin config"
+            exit 1
+          fi
           if grep -q '\${' /tmp/mods.toml; then
             echo "::error title=Jar::neoforge.mods.toml still contains an unexpanded placeholder"
             grep -n '\${' /tmp/mods.toml
@@ -106,6 +110,9 @@ jobs:
               io/github/exo2v/vantraya/mc/VantrayaChunkGenerator.class \
               io/github/exo2v/vantraya/mc/VantrayaBiomeSource.class \
               io/github/exo2v/vantraya/mc/VantrayaField.class \
+              io/github/exo2v/vantraya/mc/WorldTypePriority.class \
+              io/github/exo2v/vantraya/mixin/WorldDimensionsMixin.class \
+              vantraya_builder.mixins.json \
               data/vantraya_builder/worldgen/world_preset/vantraya.json \
               data/vantraya_builder/dimension_type/vantraya.json \
               data/vantraya_builder/worldgen/noise_settings/vantraya.json \
@@ -153,6 +160,18 @@ jobs:
           jar=$(ls build/libs/*.jar | grep -v -- '-sources' | head -n 1)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A newer commit may have landed while this build ran. If it changed anything but builds/, the run for it
+          # publishes a jar of the newer sources - committing this older jar now could overwrite that one.
+          if git fetch -q origin "${GITHUB_REF_NAME}"; then
+            if ! newer=$(git diff --name-only "${GITHUB_SHA}" "origin/${GITHUB_REF_NAME}" -- . ':(exclude)builds'); then
+              echo "::warning title=builds/::could not compare this build with the branch tip, so it is not published"
+              exit 0
+            fi
+            if [ -n "$newer" ]; then
+              echo "::notice title=builds/::the branch has moved on to newer sources ($(echo "$newer" | head -n 3 | tr '\n' ' ')) - the run for them publishes its jar"
+              exit 0
+            fi
+          fi
           git add --all builds
           if git diff --cached --quiet; then
             echo "builds/ already holds exactly this jar - nothing to commit"
@@ -191,7 +210,7 @@ jobs:
           section() { echo "== $1 =="; head -c "$2"; echo; }
           {
             grep -E -A5 ' FAILED$' build.log | cut -c1-170 | section "failed tests" 1200
-            grep -E -A7 'Encountered an unexpected exception|Exception in server tick loop|Failed to load vanilla datapack|Failed to start the minecraft server|Failed to initialize server|Registry loading errors' build.log | cut -c1-170 | section "the game's own errors" 1100
+            grep -E -A7 'Encountered an unexpected exception|Exception in server tick loop|Failed to load vanilla datapack|Failed to start the minecraft server|Failed to initialize server|Registry loading errors|Mixin apply|MixinApplyError|InjectionError|Critical injection failure|Mixin transformation' build.log | cut -c1-170 | section "the game's own errors" 1100
             grep -E -A2 'error:|What went wrong|Execution failed|Could not (resolve|find)' build.log | cut -c1-170 | section "compiler / gradle" 500
             for f in /tmp/threads-*.txt; do
               [ -f "$f" ] || continue
