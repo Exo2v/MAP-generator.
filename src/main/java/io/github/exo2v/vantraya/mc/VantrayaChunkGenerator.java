@@ -138,7 +138,7 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
 
     /** The columns {@link #terrainTopY} reads: the one asked for and a ring of eight about three blocks around it. */
     private static final int[][] LOOK_AROUND = {
-            {0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}, {2, 2}, {2, -2}, {-2, 2}, {-2, -2}};
+            {0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}};
 
     /**
      * The Y of the top solid block of the <em>terrain</em> at (x, z): the highest top block among the column and a

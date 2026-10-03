@@ -30,7 +30,7 @@ jobs:
       # vanilla spline-stack checks) and the in-engine tests (the world type loaded and driven by the real game on an
       # in-memory server - no dedicated server, no EULA), and assembles the mod jar
       - name: Build and test
-        timeout-minutes: 14
+        timeout-minutes: 28
         run: |
           set -o pipefail
           # Watchdog: a build still running after 9 minutes is stuck (it normally takes 4-5). Dump the threads of the

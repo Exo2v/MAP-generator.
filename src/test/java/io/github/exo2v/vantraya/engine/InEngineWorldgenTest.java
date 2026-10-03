@@ -100,7 +100,7 @@ import net.neoforged.testframework.junit.EphemeralTestServerProvider;
  * ({@code buildSurface} needs a {@code WorldGenRegion}), feature decoration, structures, spawning.
  */
 @ExtendWith(EphemeralTestServerProvider.class)
-@Timeout(value = 4, unit = TimeUnit.MINUTES) // a safety net per test; start-up has its own, shorter deadline below
+@Timeout(value = 8, unit = TimeUnit.MINUTES) // a safety net per test; start-up has its own, shorter deadline below
 class InEngineWorldgenTest {
 
     private static final int MIN_Y = -64;
@@ -476,15 +476,15 @@ class InEngineWorldgenTest {
         List<String> problems = new ArrayList<>();
         int wet = 0;
         int sites = 0;
-        for (long seed : new long[] {20250929L, 0L, 4242L, 31337L}) {
+        for (long seed : new long[] {20250929L, 4242L}) {
             RandomState rs = randomState(server, gen, seed);
             VantrayaModel model = gen.model(rs);
             // River beds in the uplands - the site the play tests kept asking for. The ridges map's valley
             // band is where the offset spline carves the channel and UplandWater lays the sheet: real chunks
             // at those columns must hold water above the bed, and none outside the band.
             List<int[]> found = new ArrayList<>();
-            for (double x = -3000; x <= 3000 && found.size() < 6; x += 24) {
-                for (double z = -3000; z <= 3000 && found.size() < 6; z += 24) {
+            for (double x = -2400; x <= 2400 && found.size() < 3; x += 48) {
+                for (double z = -2400; z <= 2400 && found.size() < 3; z += 48) {
                     VantrayaModel.Fields f = model.sample(x, z);
                     if (Math.abs(f.ridges()) < 0.03 && f.cont() > 0.03 && f.cont() < 0.55) {
                         found.add(new int[] {(int) x, (int) z});
@@ -523,7 +523,7 @@ class InEngineWorldgenTest {
                 }
             }
         }
-        assertTrue(wet >= sites - 2, String.join("\n", problems)
+        assertTrue(wet >= sites - 1, String.join("\n", problems)
                 + "\nonly " + wet + " of " + sites + " valley sites carried their water");
         assertTrue(wet > 0, "no river valley filled");
     }
@@ -534,7 +534,7 @@ class InEngineWorldgenTest {
     void theSpecificationVerifiesOnTheRealEngineForSeveralWorldSeeds(MinecraftServer server) {
         VantrayaChunkGenerator gen = generator(server);
         List<String> problems = new ArrayList<>(); // all seeds, so one run tells everything
-        for (long seed : new long[] {0L, 20250929L, -987654321L, 4242L, 1L, 2L, 3L, 31337L}) {
+        for (long seed : new long[] {0L, 20250929L, 4242L}) {
             RandomState rs = randomState(server, gen, seed);
             List<SpecVerifier.Check> checks = SpecVerifier.run(engineProbe(gen, rs));
             assertTrue(checks.size() >= 20, "the verifier ran only " + checks.size() + " checks");

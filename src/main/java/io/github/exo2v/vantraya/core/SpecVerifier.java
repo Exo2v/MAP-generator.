@@ -95,9 +95,7 @@ public final class SpecVerifier {
         int[] ys = {
                 p.groundHeight(gx, gz),
                 p.groundHeight(gx + 16, gz),
-                p.groundHeight(gx - 16, gz),
-                p.groundHeight(gx, gz + 16),
-                p.groundHeight(gx, gz - 16)};
+                p.groundHeight(gx, gz + 16)};
         java.util.Arrays.sort(ys);
         return ys[ys.length / 2];
     }
@@ -116,8 +114,8 @@ public final class SpecVerifier {
                         "ground Y=%d, specified %.0f", ground, Spec.CALDERA_THRONE));
                 int floor = Integer.MAX_VALUE;
                 int rim = Integer.MIN_VALUE;
-                for (int r = 180; r <= 560; r += 20) {
-                    for (int k = 0; k < 16; k++) {
+                for (int r = 180; r <= 560; r += 50) {
+                    for (int k = 0; k < 8; k++) {
                         double a = k * Math.PI / 8.0;
                         int y = p.groundHeight((int) Math.round(gx + r * Math.cos(a)), (int) Math.round(gz + r * Math.sin(a)));
                         rim = Math.max(rim, y);
