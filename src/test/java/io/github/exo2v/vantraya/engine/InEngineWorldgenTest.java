@@ -534,7 +534,7 @@ class InEngineWorldgenTest {
                 }
                 boolean columnWet = false;
                 BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-                int ground = groundNear(chunk, sx, sz);
+                int ground = ground(chunk, sx, sz); // this column's own bed; the ring is for cave mouths
                 for (int y = ground + 1; y <= (int) site.waterLine() + 1; y++) {
                     if (chunk.getBlockState(pos.set(sx, y, sz)).is(Blocks.WATER)) {
                         columnWet = true;
