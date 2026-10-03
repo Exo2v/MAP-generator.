@@ -107,7 +107,13 @@ public final class Landforms {
         shelf += Mathx.smoothstep(0.70, 0.86, bars) * 8.0;
         double atoll = Mathx.stretch01(Noise.fbm(x, z, 3, 280.0, seed + 811), cal.reachAtollLo(), cal.reachAtollHi());
         shelf += Mathx.smoothstep(0.80, 0.94, atoll) * 12.0;
-        return Mathx.clamp(shelf, lm.yLo() - 3.0, Spec.SEA_LEVEL + 1.5);
+        // The centre of the reach is open water. The biome pipeline recovers the surface height from the
+        // router's quantised depth (±0.05 ≈ ±6 blocks), so ground anywhere near the waterline flips between
+        // "ocean" and "shore"; the old exact pin sat at 54 and hid that. The centre is therefore held well
+        // under the waterline and the bars and atolls rise around it, not under it.
+        double r = Math.hypot(x - lm.x(), z - lm.z());
+        double ceil = Spec.SEA_LEVEL + 1.5 - (Spec.SEA_LEVEL + 1.5 - 55.0) * (1.0 - Mathx.smoothstep(120.0, 260.0, r));
+        return Mathx.clamp(shelf, lm.yLo() - 3.0, ceil);
     }
 
     /** Spec landmark 8: solitary granite needles on a bench at the landmark's elevation. */
