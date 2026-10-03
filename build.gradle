@@ -16,8 +16,28 @@ repositories {
     mavenLocal()
 }
 
+// The jar is named after the mod, the loader and the Minecraft version it is for, then the mod's own version:
+// vantraya-builder-neoforge-1.21.1-0.1.0.jar
 base {
-    archivesName = mod_id
+    archivesName = "${mod_file_name}-neoforge-${minecraft_version}"
+}
+
+// Building the same sources twice gives the same bytes (no timestamps, fixed file order). That is what lets CI
+// tell whether builds/ already holds the jar of the current sources, and lets anyone check a jar against the
+// sources it claims to come from.
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+                'Implementation-Title'  : mod_name,
+                'Implementation-Version': mod_version,
+                'Implementation-Vendor' : mod_authors
+        )
+    }
 }
 
 // Mojang ships Java 21 to end users starting in 1.20.5, so mods target Java 21.
@@ -118,6 +138,24 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 }
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
+
+// builds/ holds the finished mod, ready to be copied into a mods/ folder (build/ is a scratch directory that is not
+// kept). The copy happens only after every check has passed, so a jar that failed its tests never lands there, and
+// it replaces the previous jar: two versions of one mod in mods/ stop the game from starting.
+tasks.register('publishBuild', Sync) {
+    group = 'build'
+    description = 'Copies the jar into builds/ once all the tests have passed'
+    dependsOn 'check'
+    from tasks.named('jar')
+    into 'builds'
+    preserve {
+        // hand-written, not a build product
+        include 'README.md'
+    }
+}
+tasks.named('build') {
+    dependsOn 'publishBuild'
+}
 
 publishing {
     publications {

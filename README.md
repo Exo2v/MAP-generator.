@@ -10,7 +10,7 @@ It is built to run **alongside** the worldgen mods in the pack — Lithosphere, 
 
 ## Using it
 
-1. Install **NeoForge 1.21.1** and drop `vantraya_builder-<version>.jar` into `mods/` (clients and server).
+1. Install **NeoForge 1.21.1** and drop the jar from [`builds/`](builds/) — `vantraya-builder-neoforge-1.21.1-<version>.jar` — into `mods/` (clients and server).
 2. *Create New World → World → World Type → **Vantraya*** (it sits with Default, Superflat, Large Biomes and Amplified). Dedicated server: `level-type=vantraya_builder:vantraya` in `server.properties`.
 3. You spawn on the **Forgotten Coast** at (0, 68, 2500), the specification's spawn.
 
@@ -82,12 +82,12 @@ Details, the exact facts about each mod, and what is *not* done are in [`docs/CO
 Requires JDK 21.
 
 ```bash
-./gradlew build          # compile, run all tests, produce build/libs/vantraya_builder-<version>.jar
+./gradlew build          # compile, run all tests, then put vantraya-builder-neoforge-1.21.1-<version>.jar in builds/ (and build/libs/)
 ./gradlew runClient      # dev client
 ./gradlew runServer      # dev server
 ```
 
-CI (`.github/workflows/build.yml`) does `./gradlew build` and uploads the jar. The specification model (`io.github.exo2v.vantraya.core`) is plain Java without any Minecraft dependency, so its tests also run with a bare JDK and JUnit 4. The in-engine tests (`src/test/java/.../engine`) need the real game jars, so they run only under Gradle (`./gradlew test`); they start an in-memory server — no Minecraft EULA, no world on disk.
+CI (`.github/workflows/build.yml`) does `./gradlew build`, uploads the jar as a workflow artifact and — for a push on which every test passed — commits it to [`builds/`](builds/), so the jar in the repository is always one that passed its tests ([`builds/README.md`](builds/README.md) says how to tell which source it was built from). The specification model (`io.github.exo2v.vantraya.core`) is plain Java without any Minecraft dependency, so its tests also run with a bare JDK and JUnit 4. The in-engine tests (`src/test/java/.../engine`) need the real game jars, so they run only under Gradle (`./gradlew test`); they start an in-memory server — no Minecraft EULA, no world on disk.
 
 ## Repository layout
 

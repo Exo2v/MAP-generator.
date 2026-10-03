@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Write access is for one thing only: the last step commits the finished jar to builds/ (see builds/README.md).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -81,12 +85,16 @@ jobs:
           PY
 
       # What the jar must contain for the world type to exist in game: the Minecraft-facing classes, the preset and
-      # dimension type JSON, and mod metadata with every ${placeholder} expanded.
+      # dimension type JSON, and mod metadata with every ${placeholder} expanded. Also: nothing from the sources may be
+      # missing from it, and builds/ must hold this very jar (the Gradle build copies it there after the tests).
       - name: Check the jar contents
+        id: jar
         run: |
           jar=$(ls build/libs/*.jar | grep -v -- '-sources' | head -n 1)
           echo "jar: $jar"
+          echo "name=$(basename "$jar" .jar)" >> "$GITHUB_OUTPUT"
           unzip -l "$jar" > /tmp/jar.txt
+          unzip -Z1 "$jar" | sort > /tmp/in-jar.txt
           unzip -p "$jar" META-INF/neoforge.mods.toml > /tmp/mods.toml
           if grep -q '\${' /tmp/mods.toml; then
             echo "::error title=Jar::neoforge.mods.toml still contains an unexpanded placeholder"
@@ -108,14 +116,63 @@ jobs:
               exit 1
             fi
           done
-          echo "::notice title=Jar::$(basename "$jar"): $(tail -n 1 /tmp/jar.txt | xargs); metadata expanded, classes and data present"
+          # every resource file and every compiled class of the sources must be in the jar
+          { (cd src/main/resources && find . -type f -printf '%P\n'); (cd build/classes/java/main && find . -type f -name '*.class' -printf '%P\n'); } | sort > /tmp/expected.txt
+          missing=$(comm -23 /tmp/expected.txt /tmp/in-jar.txt)
+          if [ -n "$missing" ]; then
+            echo "::error title=Jar::in the sources but missing from the jar: $(echo "$missing" | head -n 5 | tr '\n' ' ')"
+            exit 1
+          fi
+          # builds/ must hold exactly this jar, and only this one
+          if ! cmp -s "$jar" "builds/$(basename "$jar")"; then
+            echo "::error title=builds/::builds/ does not hold the jar that was just built"
+            ls -la builds
+            exit 1
+          fi
+          if [ "$(ls builds/*.jar | wc -l)" != 1 ]; then
+            echo "::error title=builds/::builds/ must hold exactly one jar"
+            ls -la builds
+            exit 1
+          fi
+          echo "::notice title=Jar::$(basename "$jar"): $(tail -n 1 /tmp/jar.txt | xargs); metadata expanded, all $(wc -l < /tmp/expected.txt) classes and resource files present, identical to builds/"
 
       - name: Upload the mod jar
         uses: actions/upload-artifact@v4
         with:
-          name: vantraya_builder
+          name: ${{ steps.jar.outputs.name }}
           path: build/libs/*.jar
           if-no-files-found: error
+
+      # Last step of a build that passed everything above: commit the jar to builds/, so that it can be picked up from
+      # the repository itself (the logs and artifacts of a run cannot be downloaded from every network). The archive
+      # is reproducible, so a rebuild of unchanged sources gives the identical jar and there is nothing to commit.
+      # A push made with the workflow's own token never starts another run.
+      - name: Commit the jar to builds/
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: |
+          jar=$(ls build/libs/*.jar | grep -v -- '-sources' | head -n 1)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all builds
+          if git diff --cached --quiet; then
+            echo "builds/ already holds exactly this jar - nothing to commit"
+            exit 0
+          fi
+          git commit -q \
+            -m "builds: $(basename "$jar")" \
+            -m "Built by CI from ${GITHUB_SHA} (run ${GITHUB_RUN_ID}) after every test passed. SHA-256 $(sha256sum "$jar" | cut -d' ' -f1)." \
+            -m "[skip ci]"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"; then
+              echo "::notice title=builds/::committed $(basename "$jar") to ${GITHUB_REF_NAME}"
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}): the branch has moved, rebasing onto its new tip"
+            git fetch -q origin "${GITHUB_REF_NAME}"
+            git rebase -q "origin/${GITHUB_REF_NAME}"
+          done
+          echo "::error title=builds/::could not push the jar to ${GITHUB_REF_NAME}"
+          exit 1
 
       - name: Upload test reports
         if: always()
