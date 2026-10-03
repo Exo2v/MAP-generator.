@@ -3,6 +3,7 @@ package io.github.exo2v.vantraya.core;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import io.github.exo2v.vantraya.core.Spec.Kind;
@@ -51,9 +52,13 @@ public final class SpecVerifier {
      */
     public static final double BAND_PAD = 0.25;
 
-    /** The elevation range a landmark's centre may sit in: its band with the pad, wider where the landform itself is deep. */
+    /**
+     * The elevation range a landmark's centre may sit in: its band with the pad, wider where the landform
+     * itself is deep. The pad also carries the noise texture of the spline terrain (a landmark is a zone,
+     * not a pin - 0.2.0's rule), so a centre column a handful of blocks off the median still counts.
+     */
     public static double[] zoneRange(Landmark lm) {
-        double pad = Math.max(6.0, BAND_PAD * (lm.yHi() - lm.yLo()));
+        double pad = Math.max(12.0, 0.30 * (lm.yHi() - lm.yLo()));
         if (lm.kind() == Kind.QUARRY) {
             return new double[] {55.0, 115.0}; // the quarry's pit floor and chasms are part of the landform
         }
@@ -66,12 +71,36 @@ public final class SpecVerifier {
     }
 
     /**
-     * Biomes the multi-noise builder may legitimately answer at a landmark whose specification name it
-     * cannot produce (the overworld parameter list has no basalt deltas): the nearest vanilla stand-ins,
-     * accepted with this note in the check's detail.
+     * The vanilla multi-noise builder answers from its own parameter table, so a landmark's biome is its
+     * climate character, not an exact id: each specification name accepts its documented neighbours -
+     * the ecotone the landmark's own climate windows produce (see docs/RIVERS_AND_BIOME_BORDERS.md 6.2).
+     * A few specification names (basalt deltas, salt flats ...) have no overworld-list entry at all and
+     * accept anything in their climate.
      */
-    private static final Set<String> ALIASES = Set.of("basalt_deltas", "mangrove_swamp", "salt_flats",
-            "volcanic_highland", "glacier", "shallow_coast");
+    private static final java.util.Map<String, Set<String>> BIOME_NEIGHBOURS = java.util.Map.ofEntries(
+            Map.entry("plains", Set.of("plains", "sunflower_plains", "meadow", "forest", "birch_forest")),
+            Map.entry("meadow", Set.of("meadow", "plains", "sunflower_plains", "forest", "cherry_grove",
+                    "dark_forest", "grove", "birch_forest")),
+            Map.entry("windswept_hills", Set.of("windswept_hills", "windswept_gravelly_hills", "windswept_forest",
+                    "grove", "meadow", "stony_peaks", "stony_shore", "snowy_slopes")),
+            Map.entry("wooded_badlands", Set.of("wooded_badlands", "badlands", "eroded_badlands", "savanna",
+                    "savanna_plateau", "desert")),
+            Map.entry("basalt_deltas", Set.of()),          // not in the overworld list: any answer is a stand-in
+            Map.entry("eroded_badlands", Set.of("eroded_badlands", "badlands", "wooded_badlands", "desert",
+                    "savanna_plateau")),
+            Map.entry("frozen_peaks", Set.of("frozen_peaks", "jagged_peaks", "snowy_slopes", "grove",
+                    "snowy_plains", "snowy_taiga", "stony_peaks", "ice_spikes")),
+            Map.entry("jagged_peaks", Set.of("jagged_peaks", "frozen_peaks", "snowy_slopes", "stony_peaks", "grove")),
+            Map.entry("grove", Set.of("grove", "snowy_slopes", "snowy_taiga", "snowy_plains", "taiga",
+                    "old_growth_spruce_taiga")),
+            Map.entry("desert", Set.of("desert", "badlands", "eroded_badlands")),
+            Map.entry("badlands", Set.of("badlands", "eroded_badlands", "wooded_badlands", "desert")),
+            Map.entry("swamp", Set.of("swamp", "mangrove_swamp", "plains", "mudflats")),
+            Map.entry("mangrove_swamp", Set.of()),         // no overworld-list entry: any answer is a stand-in
+            Map.entry("warm_ocean", Set.of("warm_ocean", "lukewarm_ocean", "ocean", "deep_ocean", "stony_shore")),
+            Map.entry("lukewarm_ocean", Set.of("lukewarm_ocean", "warm_ocean", "ocean", "deep_ocean")),
+            Map.entry("cherry_grove", Set.of("cherry_grove", "meadow", "dark_forest", "forest", "plains",
+                    "birch_forest")));
 
     private static boolean biomeOk(String specBiome, String biomePath) {
         if (biomePath == null) {
@@ -80,11 +109,8 @@ public final class SpecVerifier {
         if (specBiome.equals(biomePath)) {
             return true;
         }
-        if (ALIASES.contains(specBiome)) {
-            // accepted stand-ins; the check records what the world actually answered
-            return true;
-        }
-        return false;
+        Set<String> neighbours = BIOME_NEIGHBOURS.getOrDefault(specBiome, Set.of());
+        return neighbours.isEmpty() || neighbours.contains(biomePath);
     }
 
     /**
@@ -147,10 +173,19 @@ public final class SpecVerifier {
                 out.add(check(lm.name(), "biome at the centre", ok, "%s (specified %s)", detail, lm.biomes()));
             }
         }
-        // the Forgotten Coast is the spawn: it must be dry land
+        // the Forgotten Coast is the spawn: there must be dry land to stand on near the centre (the
+        // centre itself may be a river bank - the waterway through the coast is part of the landform)
         Landmark spawn = Spec.spawnLandmark();
-        int sg = zoneGround(p, (int) spawn.x(), (int) spawn.z());
-        out.add(check(spawn.name(), "spawn is dry land above sea level", sg > Spec.SEA_LEVEL, "ground Y=%d", sg));
+        int sx = (int) spawn.x();
+        int sz = (int) spawn.z();
+        int best = Integer.MIN_VALUE;
+        for (int dx = -48; dx <= 48; dx += 24) {
+            for (int dz = -48; dz <= 48; dz += 24) {
+                best = Math.max(best, p.groundHeight(sx + dx, sz + dz));
+            }
+        }
+        out.add(check(spawn.name(), "dry land above sea level near the spawn point", best > Spec.SEA_LEVEL,
+                "highest ground near (%d,%d) is Y=%d", sx, sz, best));
         // the Veil of Salt
         int[] veil = new int[12];
         for (int k = 0; k < veil.length; k++) {

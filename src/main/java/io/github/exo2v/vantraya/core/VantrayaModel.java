@@ -173,7 +173,18 @@ public final class VantrayaModel {
         double sx = x / 2700.0;
         double sz = (z + 1500.0) / 2300.0;
         cont += 0.12 * Math.exp(-(sx * sx + sz * sz));
-        return Mathx.clamp(cont + Noise.fbm(x, z, 3, 900.0, seed + 23) * 0.05, -1.20, 1.20);
+        cont += Noise.fbm(x, z, 3, 900.0, seed + 23) * 0.05;
+        // The specification's shelf law (HANDOFF 5.6): beyond the shelf's inner edge the ground drops to
+        // the Veil of Salt's abyss floor. The spline terrain obeys the drop through the continents map -
+        // past SHELF_INNER every column is pulled to the deep-ocean band, textured so the seabed is not a
+        // perfect disc. Inside the shelf the coastline rules above are untouched.
+        double r = Math.hypot(x, z);
+        double shelf = Mathx.smoothstep(Spec.SHELF_INNER - 200.0, Spec.VEIL_RADIUS + 300.0, r);
+        if (shelf > 0.0) {
+            double abyssCont = -0.72 + Noise.fbm(x, z, 2, 1400.0, seed + 1301) * 0.10;
+            cont = Mathx.lerp(cont, abyssCont, shelf);
+        }
+        return Mathx.clamp(cont, -1.20, 1.20);
     }
 
     /**
