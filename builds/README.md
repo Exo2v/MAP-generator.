@@ -57,5 +57,6 @@ The tests prove the landmarks, elevations, climate tiers and the surface table. 
 
 ## Versions
 
+* **0.1.2** — from the second play session: no more Nether structures in the overworld (the nether fortress by the caldera) and no structures standing in rivers; biome borders blend in patches instead of "very stark borders"; rivers and lakes carry real water up into the highlands (Y ≈ 150), so the continent can be travelled by water. New options `fillRivers` and `structurePolicy`.
 * **0.1.1** — a data pack's own `minecraft:overworld` no longer replaces the Vantraya world type; `/vantraya where` and the log say which generator a world uses; optional `preselectWorldType` (client config, off by default); the mod now declares Minecraft 1.21.1 / NeoForge 21.1.x only.
 * **0.1.0** — first build.

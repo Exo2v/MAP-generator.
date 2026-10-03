@@ -64,7 +64,7 @@ public final class VantrayaModel {
             double temperature, double humidity,
             double demMacro, double height,
             int landmark, boolean lava, boolean noWater, boolean noLake,
-            double river, double lake,
+            double river, double lake, double waterLine,
             double rough3d, double pin,
             double tempAsh, double humAsh) {
 
@@ -422,6 +422,7 @@ public final class VantrayaModel {
         // ---- 7. rivers, lakes (runtime replacement for hydrology) ---------------------------
         double river = 0.0;
         double lake = 0.0;
+        double waterLine = NO_WATER_LINE;
         if (cfg.carveWater() && !noWater && r < Spec.SHELF_INNER) {
             double[] wr = water(x, z, dem, rid, cont, noLake);
             // The specification gives every landmark centre an exact elevation, so water stays out of the pin
@@ -430,6 +431,7 @@ public final class VantrayaModel {
             dem = dem + (wr[0] - dem) * keep;
             river = wr[1] * keep;
             lake = wr[2] * keep;
+            waterLine = wr[3];
         }
 
         // ---- 8. landmark re-pinning (HANDOFF 5.12) ------------------------------------------
@@ -463,9 +465,14 @@ public final class VantrayaModel {
         }
         double rough3d = (0.12 + 0.88 * rugged) * (1.0 - pinMask);
 
+        // A water surface at or below the finished ground (re-pinning lifts it near a landmark) means the
+        // channel is not cut here: this column is a bank and gets no water.
+        if (waterLine <= dem) {
+            waterLine = NO_WATER_LINE;
+        }
         return new Fields(x, z, cont, ero, rid,
                 tFinalUnit * 2.0 - 1.0, hFinalUnit * 2.0 - 1.0,
-                demMacro, dem, owner, lava, noWater, noLake, river, lake, rough3d, pinMask,
+                demMacro, dem, owner, lava, noWater, noLake, river, lake, waterLine, rough3d, pinMask,
                 tAshUnit * 2.0 - 1.0, hAshUnit * 2.0 - 1.0);
     }
 
@@ -566,25 +573,39 @@ public final class VantrayaModel {
     // rivers and lakes
     // ---------------------------------------------------------------------------------------
 
-    /** The river bed sits this far below the waterline. */
-    private static final double TRUNK_BED = Spec.SEA_LEVEL - 4.0;
-    private static final double TRIB_BED = Spec.SEA_LEVEL - 3.0;
-    private static final double LAKE_BED = Spec.SEA_LEVEL - 5.0;
+    /** The water surface of a channel sits this far below the natural ground of its bed. */
+    private static final double RIVER_INCISE = 2.0;
+    /** How far below the water surface the channel floors are cut. */
+    private static final double TRUNK_DEPTH = 4.0;
+    private static final double TRIB_DEPTH = 3.0;
+    private static final double LAKE_DEPTH = 3.5;
+
+    /** {@link Fields#waterLine} of a column with no channel in it. */
+    public static final double NO_WATER_LINE = -1.0E9;
 
     /**
-     * Local stand-in for the offline hydrology: carve river valleys through the lowlands and open lake
-     * basins in them. Rivers are the zero set of a domain-warped noise (they meander, join and end at
-     * the sea), strongest where the ridges field is near zero - the specification's "wide U-shaped river
-     * valleys at R ~ 0" - and absent on ridge crests. Rivers fade out between about Y = 72 and Y = 104 and
-     * lakes below Y = 80 (water here is sea-level water), and a closed-basin landform keeps its rivers but never its lakes.
+     * Local stand-in for the offline hydrology: carve river valleys through the land and open lake basins in
+     * them. Rivers are the zero set of a domain-warped noise (they meander, join and end at the sea), strongest
+     * where the ridges field is near zero - the specification's "wide U-shaped river valleys at R ~ 0" - and
+     * absent on ridge crests.
      *
-     * @return {@code {dem, riverStrength, lakeStrength}}
+     * <p>A channel follows the terrain: its water surface sits {@link #RIVER_INCISE} blocks below the natural
+     * ground of the bed and the floor a few blocks below that, so a river runs downhill across the continent
+     * and carries real water (the {@code RiverWater} pass fills it to {@link Fields#waterLine}) instead of
+     * being a dry notch. Rivers reach up to about Y = 150 and lakes to about Y = 110 and fade out above
+     * (the first play test found the old lowland-only network a "critical lack of waterways"), and a
+     * closed-basin landform keeps its rivers but never its lakes.
+     *
+     * @return {@code {dem, riverStrength, lakeStrength, waterSurfaceY}}
      */
     private double[] water(double x, double z, double dem, double rid, double cont, boolean noLake) {
-        double low = 1.0 - Mathx.smoothstep(Spec.SEA_LEVEL + 10.0, Spec.SEA_LEVEL + 42.0, dem);
+        double low = 1.0 - Mathx.smoothstep(150.0, 190.0, dem);
         if (low <= 0.0) {
-            return new double[] {dem, 0.0, 0.0};
+            return new double[] {dem, 0.0, 0.0, NO_WATER_LINE};
         }
+        double line = dem - RIVER_INCISE;
+        double trunkBed = line - TRUNK_DEPTH;
+        double tribBed = line - TRIB_DEPTH;
         double[] w = new double[2];
         Noise.domainWarp(x, z, 900.0, 300.0, seed + 6001, 3, w);
         double wx = w[0];
@@ -594,7 +615,7 @@ public final class VantrayaModel {
 
         // trunk rivers
         double trunkDist = zeroSetDistance(wx, wz, 1500.0, seed + 6011);
-        double halfTrunk = 5.0 + 8.0 * seaward;
+        double halfTrunk = 6.0 + 9.0 * seaward;
         double s1 = ridgeFactor * low;
         double t1 = trunkDist / halfTrunk;
         double chan1 = (1.0 - Mathx.smoothstep(0.55, 1.0, t1)) * s1;
@@ -602,7 +623,7 @@ public final class VantrayaModel {
 
         // tributaries (narrower)
         double tribDist = zeroSetDistance(wx, wz, 650.0, seed + 6013);
-        double halfTrib = 3.0 + 1.5 * seaward;
+        double halfTrib = 3.5 + 2.0 * seaward;
         double s2 = ridgeFactor * low * 0.85;
         double t2 = tribDist / halfTrib;
         double chan2 = (1.0 - Mathx.smoothstep(0.55, 1.0, t2)) * s2;
@@ -610,19 +631,21 @@ public final class VantrayaModel {
 
         double out = dem;
         double valley = Math.max(val1, val2);
-        out -= valley * Math.max(out - (TRUNK_BED + 10.0), 0.0) * 0.55;
-        out = out * (1.0 - chan2) + Math.min(out, TRIB_BED) * chan2;
-        out = out * (1.0 - chan1) + Math.min(out, TRUNK_BED) * chan1;
+        double bed = chan1 >= chan2 ? trunkBed : tribBed;
+        out -= valley * Math.max(out - bed, 0.0) * 0.45; // the wide U: ground slopes towards the channel floor
+        out = out * (1.0 - chan2) + Math.min(out, tribBed) * chan2;
+        out = out * (1.0 - chan1) + Math.min(out, trunkBed) * chan1;
         double river = Math.max(chan1, chan2);
 
         double lakeStrength = 0.0;
         if (!noLake) {
             double ln = Noise.fbm(x, z, 3, 1300.0, seed + 6021);
-            double low2 = 1.0 - Mathx.smoothstep(Spec.SEA_LEVEL + 2.0, Spec.SEA_LEVEL + 18.0, dem);
+            double low2 = 1.0 - Mathx.smoothstep(110.0, 150.0, dem);
             lakeStrength = Mathx.smoothstep(0.22, 0.34, ln) * low2;
-            out = out * (1.0 - lakeStrength) + Math.min(out, LAKE_BED) * lakeStrength;
+            out = out * (1.0 - lakeStrength) + Math.min(out, line - LAKE_DEPTH) * lakeStrength;
         }
-        return new double[] {out, river, lakeStrength};
+        double waterLine = river + lakeStrength > 0.02 ? line : NO_WATER_LINE;
+        return new double[] {out, river, lakeStrength, waterLine};
     }
 
     /** Approximate distance (blocks) to the zero contour of an fBm: {@code |n| / |grad n|}. */

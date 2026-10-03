@@ -137,7 +137,7 @@ public class ModelTest {
     }
 
     @Test
-    public void riversAreLowlandFeatures() {
+    public void riversReachTheMidlandsButNotThePeaks() {
         VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
         int rivers = 0;
         for (double x = -3300; x <= 3300; x += 10) {
@@ -145,7 +145,9 @@ public class ModelTest {
                 Fields f = m.sample(x, z);
                 if (f.river() > 0.05) {
                     rivers++;
-                    assertTrue("river on high ground (" + f.height() + ") at " + x + "," + z, f.height() < 104.0);
+                    // the network reaches the midlands (the first play test wanted waterways to travel by)
+                    // and fades out on the high ground where the peaks are
+                    assertTrue("river on the peaks (" + f.height() + ") at " + x + "," + z, f.height() < 190.0);
                 }
             }
         }
@@ -174,6 +176,73 @@ public class ModelTest {
             }
             double share = (double) water / inland;
             assertTrue("seed " + seed + ": inland water share " + share, share > 0.015 && share < 0.12);
+        }
+    }
+
+    @Test
+    public void uplandRiversHaveAWaterSurfaceToFill() {
+        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
+        int checked = 0;
+        for (double x = -3000; x <= 3000; x += 12) {
+            for (double z = -3000; z <= 3000; z += 12) {
+                Fields f = m.sample(x, z);
+                if (f.river() > 0.5 && f.height() > 75.0) {
+                    if (f.waterLine() <= VantrayaModel.NO_WATER_LINE + 1.0) {
+                        continue; // the bank of a channel that is not cut deep enough here
+                    }
+                    assertTrue("water below its bed at " + x + "," + z, f.waterLine() > f.height());
+                    assertTrue("flooded channel (+" + (f.waterLine() - f.height()) + ") at " + x + "," + z,
+                            f.waterLine() - f.height() <= 7.0);
+                    checked++;
+                }
+            }
+        }
+        assertTrue("no upland channels found", checked > 100);
+    }
+
+    @Test
+    public void waterwayCoverageReachesTheHighlands() {
+        for (long seed : new long[] {Spec.SPEC_SEED, 424242L, 7L}) {
+            VantrayaModel m = VantrayaModel.forSeed(seed);
+            int cols = 0;
+            int channel = 0;
+            int upland = 0;
+            for (double x = -3300; x <= 3300; x += 16) {
+                for (double z = -3300; z <= 3300; z += 16) {
+                    if (Math.hypot(x, z) > 3300) {
+                        continue;
+                    }
+                    Fields f = m.sample(x, z);
+                    if (f.cont() <= 0.05 || f.landmark() == 6) {
+                        continue;
+                    }
+                    cols++;
+                    if (f.river() > 0.3 || f.lake() > 0.4) {
+                        channel++;
+                        if (f.height() > 70.0) {
+                            upland++;
+                        }
+                    }
+                }
+            }
+            double cover = (double) channel / cols;
+            double high = (double) upland / cols;
+            assertTrue("seed " + seed + ": waterway cover " + cover, cover > 0.05 && cover < 0.20);
+            assertTrue("seed " + seed + ": upland waterway cover " + high, high > 0.03 && high < 0.20);
+        }
+    }
+
+    @Test
+    public void theWaterLineIsGoneWhereThereIsNoChannel() {
+        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
+        for (double x = -2000; x <= 2000; x += 37) {
+            for (double z = -2000; z <= 2000; z += 37) {
+                Fields f = m.sample(x, z);
+                if (f.river() <= 0.02 && f.lake() <= 0.02) {
+                    assertEquals("water line on dry ground at " + x + "," + z,
+                            VantrayaModel.NO_WATER_LINE, f.waterLine(), 0.0);
+                }
+            }
         }
     }
 

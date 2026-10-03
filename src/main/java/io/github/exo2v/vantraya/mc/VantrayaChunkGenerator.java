@@ -1,7 +1,9 @@
 package io.github.exo2v.vantraya.mc;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import com.mojang.serialization.MapCodec;
@@ -11,26 +13,36 @@ import io.github.exo2v.vantraya.core.Spec;
 import io.github.exo2v.vantraya.core.VantrayaModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureSet;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 import net.minecraft.world.level.levelgen.synth.NormalNoise;
 
 /**
  * The Vantraya chunk generator: vanilla's noise generator - caves, aquifers, ore veins, structures, features
  * all as usual - fed by the specification's height field (through the noise settings' density functions) plus
- * three small post-passes the specification calls for and a density function cannot express:
+ * the small passes the specification calls for and a density function cannot express:
  * <ol>
- *   <li>after the noise fill, open water is drained from the caldera (and lava is poured on its floor);</li>
- *   <li>after the biome surface rules, the slope-aware surface table is applied.</li>
+ *   <li>at the structure step, {@link StructurePolicy} throws out the structures that do not belong here;</li>
+ *   <li>after the noise fill, open water is drained from the caldera and the rivers and lakes get their water
+ *       ({@link RiverWater});</li>
+ *   <li>after the biome surface rules, the slope-aware surface table is applied and the caldera's lava poured.</li>
  * </ol>
  * Because it is still a {@code NoiseBasedChunkGenerator} wired through normal noise settings, other mods'
  * hooks (Lithostitched noise-router wrappers, surface-rule injection, biome modifiers that add features to
@@ -46,7 +58,12 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
     private record Cached(RandomState state, VantrayaModel model) {
     }
 
+    /** The model a {@link ChunkGeneratorStructureState} belongs to (structures run before the noise fill). */
+    private record StateModel(ChunkGeneratorStructureState state, VantrayaModel model) {
+    }
+
     private volatile Cached cached;
+    private volatile StateModel stateModel;
 
     public VantrayaChunkGenerator(BiomeSource biomeSource, Holder<NoiseGeneratorSettings> settings) {
         super(biomeSource, settings);
@@ -55,6 +72,58 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
     @Override
     protected MapCodec<? extends ChunkGenerator> codec() {
         return CODEC;
+    }
+
+    @Override
+    public ChunkGeneratorStructureState createState(HolderLookup<StructureSet> structureSets,
+                                                    RandomState randomState, long seed) {
+        ChunkGeneratorStructureState state = super.createState(structureSets, randomState, seed);
+        this.stateModel = new StateModel(state,
+                WorldSeeds.modelFor(randomState.getOrCreateNoise(VantrayaField.SEED_PROBE)::getValue));
+        return state;
+    }
+
+    /**
+     * Vanilla generates every structure whose biome tag matches the site; for a Vantraya world
+     * {@link StructurePolicy} says which ones are thrown out again - Nether structures (the caldera is basalt
+     * deltas, and vanilla's fortress tag is {@code #minecraft:is_nether}), and structures that would stand in
+     * the middle of a river or lake. This runs at the structure step, before the terrain exists, so the site is
+     * read from the specification model; the real Nether and other world types never pass through here.
+     */
+    @Override
+    public void createStructures(RegistryAccess registryAccess, ChunkGeneratorStructureState structureState,
+                                 StructureManager structureManager, ChunkAccess chunk,
+                                 StructureTemplateManager templateManager) {
+        super.createStructures(registryAccess, structureState, structureManager, chunk, templateManager);
+        if (!VantrayaConfig.structurePolicy()) {
+            return;
+        }
+        VantrayaModel model = modelOf(structureState);
+        List<Structure> dropped = new ArrayList<>();
+        for (Map.Entry<Structure, StructureStart> entry : chunk.getStarts().entrySet()) {
+            StructureStart start = entry.getValue();
+            if (start == null || !start.isValid()) {
+                continue;
+            }
+            BoundingBox box = start.getBoundingBox();
+            int cx = (box.minX() + box.maxX()) / 2;
+            int cz = (box.minZ() + box.maxZ()) / 2;
+            if (StructurePolicy.drop(entry.getKey(), model.sample(cx + 0.5, cz + 0.5))) {
+                dropped.add(entry.getKey());
+            }
+        }
+        for (Structure structure : dropped) {
+            chunk.setStartForStructure(structure, StructureStart.INVALID_START);
+        }
+    }
+
+    private VantrayaModel modelOf(ChunkGeneratorStructureState structureState) {
+        StateModel sm = this.stateModel;
+        if (sm != null && sm.state() == structureState) {
+            return sm.model();
+        }
+        // a state this generator did not make (a test driving the chunks directly): the canonical model
+        return VantrayaModel.forSeed(Spec.SPEC_SEED);
     }
 
     /** The specification model of the world this generator is running in. */
@@ -93,8 +162,12 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState,
                                                         StructureManager structureManager, ChunkAccess chunk) {
         return super.fillFromNoise(blender, randomState, structureManager, chunk).thenApply(filled -> {
+            VantrayaModel model = model(randomState);
             if (VantrayaConfig.keepCalderaDry()) {
-                CalderaFluids.drain(filled, model(randomState));
+                CalderaFluids.drain(filled, model);
+            }
+            if (VantrayaConfig.fillRivers()) {
+                RiverWater.fill(filled, model);
             }
             return filled;
         });

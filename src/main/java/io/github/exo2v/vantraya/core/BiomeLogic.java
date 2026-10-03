@@ -52,6 +52,12 @@ public final class BiomeLogic {
     private static final double[] TEMP_EDGES = {0.16, 0.33, 0.50, 0.67, 0.83};
     private static final double[] HUM_EDGES = {0.24, 0.42, 0.58, 0.76};
 
+    /** Size of the patches in which the two sides of a decision edge alternate. */
+    private static final int BLEND_PATCH = 64;
+
+    /** How far around a point the region seams are probed: the width of the blended border band. */
+    private static final double[][] SEAM_PROBES = {{12, 0}, {-12, 0}, {0, 12}, {0, -12}};
+
     /** {@code np.digitize}: the number of edges that are {@code <= v}. */
     private static int digitize(double v, double[] edges) {
         int n = 0;
@@ -102,9 +108,26 @@ public final class BiomeLogic {
 
     /** Surface biome of the column whose ground is at {@code hs} blocks. */
     public static BiomeRole surfaceRole(double x, double z, double hs, double t, double h, double c, double e) {
+        return surfaceRole(x, z, hs, t, h, c, e, true);
+    }
+
+    /**
+     * The surface decision, optionally blended (the outer {@link #surfaceRole} blends; the seam probes below
+     * ask their neighbours without blending).
+     *
+     * <p>Blending: the specification's classifier is a set of thresholds, and a threshold is a wall - the
+     * first play test found "very stark borders" where two contrasting biomes met. So the thresholds are
+     * wobbled by a little coherent noise (the border wanders) and within reach of a border the two sides
+     * alternate in patches (the border is mottled). Landmark centres are exempt: {@link Spec#protection}
+     * stills the wobble there, so every pinned elevation and biome stays exactly as specified.
+     */
+    private static BiomeRole surfaceRole(double x, double z, double hs, double t, double h, double c, double e,
+                                         boolean blend) {
+        double jitter = 1.0 - Spec.protection(x, z);
+        double tU = Mathx.saturate((t + 1.0) * 0.5) + 0.07 * wobble(x, z, 0xB1) * jitter;
+        double hU = Mathx.saturate((h + 1.0) * 0.5) + 0.07 * wobble(x, z, 0xB2) * jitter;
+        double hsJ = hs + 5.0 * wobble(x, z, 0xB3) * jitter;
         int id = Regions.idAt(x, z);
-        double tU = Mathx.saturate((t + 1.0) * 0.5);
-        double hU = Mathx.saturate((h + 1.0) * 0.5);
         boolean veil = id == Spec.VEIL_ID;
         Landmark lm = id >= 0 && id < Spec.LANDMARKS.size() ? Spec.LANDMARKS.get(id) : null;
         Kind kind = lm == null ? null : lm.kind();
@@ -116,7 +139,13 @@ public final class BiomeLogic {
         // ---- the Veil of Salt: cold, wet, featureless abyss ----------------------------------
         if (veil) {
             // both spec biomes occur, in broad patches (the Veil's temperature is a constant cold clamp)
-            return e < 0.0 ? BiomeRole.DEEP_COLD_OCEAN : BiomeRole.DEEP_OCEAN;
+            if (e < -0.08) {
+                return BiomeRole.DEEP_COLD_OCEAN;
+            }
+            if (e > 0.08) {
+                return BiomeRole.DEEP_OCEAN;
+            }
+            return patchTakes(x, z, 7) ? BiomeRole.DEEP_OCEAN : BiomeRole.DEEP_COLD_OCEAN;
         }
 
         // ---- water ---------------------------------------------------------------------------
@@ -134,7 +163,7 @@ public final class BiomeLogic {
         }
 
         // ---- the caldera and the rest of the specification's landmark palettes -------------
-        double elev = hs - sea;
+        double elev = hsJ - sea;
         boolean nearCoast = c < 0.12 && elev < 4.0;
         if (nearCoast && kind != Kind.CALDERA && kind != Kind.FEN) {
             int band = digitize(tU, TEMP_EDGES);
@@ -153,10 +182,55 @@ public final class BiomeLogic {
             }
             return BiomeRole.BEACH;
         }
-        if (kind != null) {
-            return landmarkRole(kind, hs);
+        BiomeRole role = decide(hsJ, tU, hU, e, kind);
+        if (!blend) {
+            return role;
         }
-        return generic(hs, tU, hU, e);
+        // near a decision edge, the role of the other side alternates in patches (mottled borders)
+        BiomeRole[] near = {
+                decide(hsJ + 8.0, tU, hU, e, kind),
+                decide(hsJ - 8.0, tU, hU, e, kind),
+                decide(hsJ, tU + 0.07, hU, e, kind),
+                decide(hsJ, tU - 0.07, hU, e, kind),
+                decide(hsJ, tU, hU + 0.07, e, kind),
+                decide(hsJ, tU, hU - 0.07, e, kind)};
+        for (int i = 0; i < near.length; i++) {
+            if (near[i] != role && patchTakes(x, z, i)) {
+                role = near[i];
+                break;
+            }
+        }
+        // at a landmark's border, the two sides alternate in patches too (no more walls between regions)
+        for (int i = 0; i < SEAM_PROBES.length; i++) {
+            double px = x + SEAM_PROBES[i][0];
+            double pz = z + SEAM_PROBES[i][1];
+            if (Regions.idAt(px, pz) != id) {
+                BiomeRole other = surfaceRole(px, pz, hs, t, h, c, e, false);
+                if (other != role && patchTakes(x, z, 20 + i)) {
+                    role = other;
+                    break;
+                }
+            }
+        }
+        return role;
+    }
+
+    /** The role of a place before blending: the landmark's palette or the Whittaker grid. */
+    private static BiomeRole decide(double hs, double tU, double hU, double e, Kind kind) {
+        return kind != null ? landmarkRole(kind, hs) : generic(hs, tU, hU, e);
+    }
+
+    /** Two-octave value noise in {@code -1..1}: coherent wobble for the decision thresholds. */
+    private static double wobble(double x, double z, int salt) {
+        return 2.0 * (0.65 * Noise.value(x / 70.0, z / 70.0, salt)
+                + 0.35 * Noise.value(x / 23.0, z / 23.0, salt * 31)) - 1.0;
+    }
+
+    /** Patches of {@link #BLEND_PATCH} blocks: true when this patch takes the neighbouring role. */
+    private static boolean patchTakes(double x, double z, int salt) {
+        long px = Math.floorDiv((long) Math.floor(x), BLEND_PATCH);
+        long pz = Math.floorDiv((long) Math.floor(z), BLEND_PATCH);
+        return Noise.hash2(px, pz, 0x51EED000 + salt) < 0.5;
     }
 
     /**

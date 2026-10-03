@@ -39,6 +39,17 @@ public final class VantrayaConfig {
             .comment("Log which worldgen mods and biome contributions Vantraya found when a server starts.")
             .define("logCompatReport", true);
 
+    public static final ModConfigSpec.BooleanValue FILL_RIVERS = BUILDER
+            .comment("Fill the specification's river and lake channels with water (and ice where it is cold) so the",
+                    "continent can be travelled by water. Turn off for dry valleys.")
+            .define("fillRivers", true);
+
+    public static final ModConfigSpec.BooleanValue STRUCTURE_POLICY = BUILDER
+            .comment("Keep structures where they belong in a Vantraya world: no Nether structures (the Ashen Caldera",
+                    "is basalt deltas, and vanilla's fortress tag includes it), and no structures standing in the",
+                    "middle of a river or lake unless vanilla puts them in water (ruined portals, shipwrecks).")
+            .define("structurePolicy", true);
+
     public static final ModConfigSpec.BooleanValue PRESELECT_WORLD_TYPE = BUILDER
             .comment("Client side: open the Create New World screen with the Vantraya world type already selected,",
                     "instead of \"Default\". It can still be switched back there. Meant for a modpack built around this world.")
@@ -80,5 +91,13 @@ public final class VantrayaConfig {
 
     public static boolean preselectWorldType() {
         return read(PRESELECT_WORLD_TYPE, false);
+    }
+
+    public static boolean fillRivers() {
+        return read(FILL_RIVERS, true);
+    }
+
+    public static boolean structurePolicy() {
+        return read(STRUCTURE_POLICY, true);
     }
 }

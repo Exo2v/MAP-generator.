@@ -38,6 +38,7 @@ import io.github.exo2v.vantraya.core.Spec;
 import io.github.exo2v.vantraya.core.SpecVerifier;
 import io.github.exo2v.vantraya.core.VantrayaModel;
 import io.github.exo2v.vantraya.mc.CalderaFluids;
+import io.github.exo2v.vantraya.mc.StructurePolicy;
 import io.github.exo2v.vantraya.mc.SurfacePainter;
 import io.github.exo2v.vantraya.mc.VantrayaBiomeSource;
 import io.github.exo2v.vantraya.mc.VantrayaChunkGenerator;
@@ -465,6 +466,93 @@ class InEngineWorldgenTest {
         assertNotNull(WorldTypePriority.keepChosenOverworld(dimensions(server),
                 dataPackStems(server, Map.of(LevelStem.OVERWORLD, somePacksOverworld(server), LevelStem.NETHER, somePacksOverworld(server))))
                 .get(LevelStem.NETHER), "the pack's Nether is kept");
+    }
+
+    // ---- structures and waterways ---------------------------------------------------------------------------
+
+    private static Structure structure(MinecraftServer server, String path) {
+        return server.registryAccess().registryOrThrow(Registries.STRUCTURE)
+                .getHolderOrThrow(ResourceKey.create(Registries.STRUCTURE, ResourceLocation.withDefaultNamespace(path)))
+                .value();
+    }
+
+    @Test
+    void theStructurePolicyMatchesVanillasOwnTags(MinecraftServer server) {
+        // The first play test found a nether fortress in a river at the Ashen Caldera's feet: the caldera is
+        // basalt deltas, and vanilla's fortress tag is #minecraft:is_nether. These are vanilla's real files.
+        assertTrue(StructurePolicy.isNetherOnly(structure(server, "fortress").biomes()),
+                "fortress must be recognized as a Nether structure");
+        assertTrue(StructurePolicy.isNetherOnly(structure(server, "bastion_remnant").biomes()), "bastion_remnant");
+        assertTrue(StructurePolicy.isNetherOnly(structure(server, "ruined_portal_nether").biomes()), "ruined_portal_nether");
+        assertFalse(StructurePolicy.isNetherOnly(structure(server, "village_plains").biomes()),
+                "a village is not a Nether structure");
+        assertFalse(StructurePolicy.isNetherOnly(structure(server, "ruined_portal").biomes()), "ruined_portal");
+        assertFalse(StructurePolicy.isNetherOnly(structure(server, "mansion").biomes()), "mansion");
+
+        // and which structures vanilla itself puts in or on water
+        assertTrue(StructurePolicy.isWaterLegal(structure(server, "ruined_portal").biomes()),
+                "vanilla puts ruined portals in rivers");
+        assertTrue(StructurePolicy.isWaterLegal(structure(server, "shipwreck").biomes()), "shipwreck");
+        assertFalse(StructurePolicy.isWaterLegal(structure(server, "village_plains").biomes()),
+                "villages are not water structures");
+    }
+
+    @Test
+    void uplandRiversCarryWaterInTheRealChunks(MinecraftServer server) {
+        VantrayaChunkGenerator gen = generator(server);
+        List<String> problems = new ArrayList<>();
+        int filled = 0;
+        for (long seed : new long[] {20250929L, 0L, 4242L, 31337L}) {
+            RandomState rs = randomState(server, gen, seed);
+            VantrayaModel model = gen.model(rs);
+            // find an upland channel: the site the first play test said was missing water
+            int sx = Integer.MIN_VALUE;
+            int sz = Integer.MIN_VALUE;
+            VantrayaModel.Fields site = null;
+            for (double x = -3000; x <= 3000 && site == null; x += 24) {
+                for (double z = -3000; z <= 3000; z += 24) {
+                    VantrayaModel.Fields f = model.sample(x, z);
+                    if (f.river() > 0.5 && f.height() > 75.0 && f.waterLine() > f.height()) {
+                        sx = (int) x;
+                        sz = (int) z;
+                        site = f;
+                        break;
+                    }
+                }
+            }
+            if (site == null) {
+                problems.add("seed " + seed + ": no upland river channel found");
+                continue;
+            }
+            try {
+                ProtoChunk chunk = fill(gen, rs, server.registryAccess().registryOrThrow(Registries.BIOME),
+                        sx >> 4, sz >> 4);
+                int water = count(chunk, bs -> bs.is(Blocks.WATER));
+                if (water < 20) {
+                    problems.add("seed " + seed + ": only " + water + " water blocks in the channel at " + sx + "," + sz);
+                    continue;
+                }
+                boolean columnWet = false;
+                BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+                int ground = groundNear(chunk, sx, sz);
+                for (int y = ground + 1; y <= (int) site.waterLine() + 1; y++) {
+                    if (chunk.getBlockState(pos.set(sx, y, sz)).is(Blocks.WATER)) {
+                        columnWet = true;
+                        break;
+                    }
+                }
+                if (!columnWet) {
+                    problems.add("seed " + seed + ": dry channel column at " + sx + "," + sz
+                            + " (bed " + ground + ", water line " + site.waterLine() + ")");
+                    continue;
+                }
+                filled++;
+            } catch (Exception e) {
+                problems.add("seed " + seed + ": filling the chunk threw " + e);
+            }
+        }
+        assertTrue(problems.isEmpty(), String.join("\n", problems));
+        assertTrue("no upland river filled", filled > 0);
     }
 
     // ---- the terrain on the real density-function engine -----------------------------------------------

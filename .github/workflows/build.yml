@@ -111,6 +111,8 @@ jobs:
               io/github/exo2v/vantraya/mc/VantrayaBiomeSource.class \
               io/github/exo2v/vantraya/mc/VantrayaField.class \
               io/github/exo2v/vantraya/mc/WorldTypePriority.class \
+              io/github/exo2v/vantraya/mc/StructurePolicy.class \
+              io/github/exo2v/vantraya/mc/RiverWater.class \
               io/github/exo2v/vantraya/mixin/WorldDimensionsMixin.class \
               vantraya_builder.mixins.json \
               data/vantraya_builder/worldgen/world_preset/vantraya.json \
