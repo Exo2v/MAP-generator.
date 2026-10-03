@@ -78,9 +78,9 @@ public final class SpecVerifier {
      * accept anything in their climate.
      */
     private static final java.util.Map<String, Set<String>> BIOME_NEIGHBOURS = java.util.Map.ofEntries(
-            Map.entry("plains", Set.of("plains", "sunflower_plains", "meadow", "forest", "birch_forest")),
-            Map.entry("meadow", Set.of("meadow", "plains", "sunflower_plains", "forest", "cherry_grove",
-                    "dark_forest", "grove", "birch_forest")),
+            Map.entry("plains", Set.of("plains", "sunflower_plains", "flower_forest", "meadow", "forest", "birch_forest", "dark_forest")),
+            Map.entry("meadow", Set.of("meadow", "plains", "sunflower_plains", "flower_forest", "forest",
+                    "cherry_grove", "dark_forest", "grove", "birch_forest")),
             Map.entry("windswept_hills", Set.of("windswept_hills", "windswept_gravelly_hills", "windswept_forest",
                     "grove", "meadow", "stony_peaks", "stony_shore", "snowy_slopes")),
             Map.entry("wooded_badlands", Set.of("wooded_badlands", "badlands", "eroded_badlands", "savanna",
