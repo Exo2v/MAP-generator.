@@ -624,7 +624,7 @@ class InEngineWorldgenTest {
             double[] zr = SpecVerifier.zoneRange(lm);
             double texture = 20.0; // zones, not pins: the noise texture about the centre is allowed
             if (ground < zr[0] - texture || ground > zr[1] + texture) {
-                problems.add(lm.name() + ": ground Y " + ground + " (centre column " + centre + "), zone "
+                problems.add(lm.name() + ": ground Y " + ground + ", zone "
                         + java.util.Arrays.toString(zr) + " +-" + texture);
             }
             if (chunk.getBlockState(new BlockPos(x, MIN_Y, z)).isAir()) {
