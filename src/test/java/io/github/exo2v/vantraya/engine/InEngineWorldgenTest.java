@@ -303,7 +303,7 @@ class InEngineWorldgenTest {
 
         LevelStem overworld = overworld(server);
         assertTrue(overworld.generator() instanceof VantrayaChunkGenerator);
-        assertTrue(overworld.generator().getBiomeSource() instanceof VantrayaBiomeSource);
+        assertTrue(overworld.generator().getBiomeSource() instanceof net.minecraft.world.level.biome.MultiNoiseBiomeSource);
         DimensionType type = overworld.type().value();
         assertEquals(MIN_Y, type.minY());
         assertEquals(HEIGHT, type.height());
@@ -391,7 +391,7 @@ class InEngineWorldgenTest {
         assertTrue(overworld.generator() instanceof VantrayaChunkGenerator,
                 "the overworld is Vantraya's, not " + overworld.generator().getClass().getName()
                         + " - is WorldDimensionsMixin applied in this environment?");
-        assertTrue(overworld.generator().getBiomeSource() instanceof VantrayaBiomeSource);
+        assertTrue(overworld.generator().getBiomeSource() instanceof net.minecraft.world.level.biome.MultiNoiseBiomeSource);
         assertEquals(HEIGHT, overworld.type().value().height(), "and so is its dimension type");
         assertSame(packNether, baked.dimensions().get(LevelStem.NETHER).generator(),
                 "only the Vantraya overworld is protected: a pack's Nether still wins, as in vanilla");
