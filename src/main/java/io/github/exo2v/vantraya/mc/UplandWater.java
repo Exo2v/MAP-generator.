@@ -121,7 +121,7 @@ public final class UplandWater {
                 for (int y = bedY + 1; y <= top; y++) {
                     BlockState here = chunk.getBlockState(cursor.set(x, y, z));
                     if (here.isAir() || here.canBeReplaced()) {
-                        chunk.setBlockState(cursor.set(x, y, z), water);
+                        chunk.setBlockState(cursor.set(x, y, z), water, true);
                     }
                 }
             }
