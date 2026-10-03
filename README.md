@@ -6,7 +6,7 @@ A NeoForge mod for **Minecraft 1.21.1** that builds the continent of **Vantyra**
 
 It is built to run **alongside** the worldgen mods in the pack — Lithosphere, Still Life, Tectonic, Lithostitched — see [how that works](#working-alongside-lithosphere-still-life-and-tectonic).
 
-> **Status.** The specification model is complete and heavily tested, and the mod now **runs inside the real game engine** in CI. GitHub Actions compiles it against the real NeoForge 21.1.176 / Minecraft 1.21.1 jars and runs **94 tests, all passing** ([run](https://github.com/Exo2v/MAP-generator./actions/runs/37112342322)): 81 plain JUnit tests (the spec tables, a numeric cross-check against the offline Python generator this was ported from, the shipped noise-router JSON evaluated by an independent interpreter) and **13 that start Minecraft** — an in-memory server whose data is loaded by the game's own loader — and check the Vantraya world type there: the preset on the creation screen's list, the density functions, the generator and biome source, real generated chunks at every landmark, the specification's own verification on eight world seeds. The jar that passed them is in [`builds/`](builds/). **It has not been played**: nobody has opened the world creation screen, picked the preset and walked around, and none of the companion mods was available to test with. The first thing to do is create a world with it and run `/vantraya verify`. See [Status and known limits](#status-and-known-limits).
+> **Status.** The specification model is complete and heavily tested, and the mod now **runs inside the real game engine** in CI. GitHub Actions compiles it against the real NeoForge 21.1.176 / Minecraft 1.21.1 jars and runs **all tests passing** ([runs](https://github.com/Exo2v/MAP-generator./actions/workflows/build.yml)): 81 plain JUnit tests (the spec tables, a numeric cross-check against the offline Python generator this was ported from, the shipped noise-router JSON evaluated by an independent interpreter) and **18 that start Minecraft** — an in-memory server whose data is loaded by the game's own loader — and check the Vantraya world type there: the preset on the creation screen's list, the density functions, the generator and biome source, real generated chunks at every landmark, the specification's own verification on eight world seeds, and that a data pack's own overworld does not replace the Vantraya one. The jar that passed them is in [`builds/`](builds/). **It has been played once, and that found a real problem**: in a pack with Lithosphere and Still Life the world type was silently overridden by another mod's overworld (see [Troubleshooting](#troubleshooting) and [COMPATIBILITY §0](docs/COMPATIBILITY.md#0-what-the-first-real-game-showed)). That is fixed and tested against a simulated pack; **a second run in that pack is still to be done**. See [Status and known limits](#status-and-known-limits).
 
 ## Using it
 
@@ -64,18 +64,31 @@ F3 shows a `Vantraya:` line with the landmark, height, climate tier and the dens
 | `keepCalderaDry` | `true` | drain the crater and pour its lava basins |
 | `enforceWorldBorder` | `false` | 8,000-block border centred on the origin, applied once to a fresh world |
 | `logCompatReport` | `true` | log detected companion mods and data packs and biome-tag contributions at server start |
+| `preselectWorldType` | `false` | client: open the Create New World screen with the Vantraya world type already chosen (it can still be switched back) — for a modpack built around this world |
 
 ## Working alongside Lithosphere, Still Life and Tectonic
 
-Lithosphere and Tectonic each replace `minecraft:overworld`'s noise settings; Still Life (which itself requires Lithosphere) replaces the vanilla surface biomes with its own. Any one of them would normally conflict with a second terrain generator, so Vantraya **does not touch `minecraft:overworld`**: the world type ships its own dimension type, noise settings and generator, and the three mods keep working for every other world type. What is shared:
+Lithosphere and Tectonic each replace `minecraft:overworld`'s noise settings; Still Life (which itself requires Lithosphere) replaces the vanilla surface biomes with its own. Any one of them would normally conflict with a second terrain generator, so the Vantraya world type ships its **own** dimension type, noise settings and generator and leaves `minecraft:overworld`'s files alone; the three mods keep working for every other world type.
+
+**One more thing had to be handled, and was missed at first.** In Minecraft a data pack's `dimension/overworld.json` beats the world type the player picked, so a mod that replaces the whole overworld silently switches *every* world type off. That is what the first real game showed: Vantraya was chosen on the Create New World screen and the world came out as the other mods'. Vantraya Builder now carries one small mixin (`WorldDimensionsMixin`) that keeps a pack's overworld out of the merge **only when the world's overworld is Vantraya's** — other world types, the Nether and the End are untouched. It is tested in CI against a simulated pack ([COMPATIBILITY §0](docs/COMPATIBILITY.md#0-what-the-first-real-game-showed)); it has still to be confirmed in the pack that showed the problem. What is shared:
 
 * **Everything keyed to vanilla biomes and tags** — biome modifiers that add features or spawns, structure mods (Towns and Towers, Dungeons and Taverns …) — applies, because Vantraya uses vanilla-namespace biomes.
 * **Biome role tags.** Each biome role (`temperate_forest`, `xeric_shrubland`, …) is a tag, `#vantraya_builder:biome/<role>`, holding the vanilla default. Add Still Life's (or Biomes O' Plenty's …) biomes to a tag and Vantraya spreads them over exactly the places that role covers. `/vantraya biomes <namespace>` lists the IDs.
-* **Lithostitched** worldgen modifiers that target the overworld level stem should apply to Vantraya's overworld (by construction; untested).
+* **Lithostitched** worldgen modifiers that target the overworld level stem should apply to Vantraya's overworld (expected; untested).
 
 **Who decorates.** The handoff's export contract was "the mods decorate, vanilla does not". A live world has no deferred decoration step, so by default Vantraya places **vanilla biomes and vanilla's own features run**. To let Still Life (or another biome mod) decorate *instead*, put its biomes into the role tags with `"replace": true` — [how](docs/COMPATIBILITY.md#adding-another-mods-biomes). Its biome IDs are not in this repository (unknown to me), so that mapping is yours to supply; `/vantraya biomes <namespace>` lists them.
 
 Details, the exact facts about each mod, and what is *not* done are in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). The short honest version: Vantraya's *terrain* is the specification's, not Lithosphere's or Tectonic's; their terrain shaping is not borrowed because it would break the specification's exact elevations.
+
+## Troubleshooting
+
+**The world looks like ordinary Minecraft (or like Lithosphere / Still Life), not like Vantraya.** Three checks, a few seconds each:
+
+1. **F3.** In a Vantraya world the debug screen has a line starting `Vantraya:` (landmark, height, climate tier). No such line: the world was not generated by Vantraya.
+2. **`/vantraya where`.** *Unknown or incomplete command* means the jar is not loaded (wrong `mods` folder or instance, or not Minecraft 1.21.1 with NeoForge 21.1.x). *This dimension is not generated by the Vantraya world type (it uses …)* means the jar is loaded but this world's overworld came from somewhere else.
+3. **`logs/latest.log`**, search for `Vantraya:`. One line says which generator the overworld uses; another (`a data pack defines its own minecraft:overworld …`) appears whenever the guard above had to keep a pack's overworld out.
+
+A world is decided when it is **created**: a world made before an update keeps what it was made with, so create a new one (World Type → Vantraya) to see the effect of an update. If it still fails, the `Vantraya:` lines of `latest.log` and the output of `/vantraya where` are what is needed.
 
 ## Building
 
@@ -98,7 +111,7 @@ src/main/java/io/github/exo2v/vantraya/
   mc/     the thin Minecraft layer: VantrayaField (density function), VantrayaChunkGenerator,
           VantrayaBiomeSource, SurfacePainter, CalderaFluids, VantrayaCommand, config, spawn
 src/main/resources/data/vantraya_builder/   world preset, noise settings, density functions, dimension type, biome role tags
-src/test/        67 + 14 + 13 tests (spec tables, Java-vs-Python parity, model invariants, router JSON evaluation, in-engine world type)
+src/test/        67 + 14 + 18 tests (spec tables, Java-vs-Python parity, model invariants, router JSON evaluation, in-engine world type)
 scripts/generate_data.py   regenerates the worldgen JSON from vanilla 1.21.1 data
 docs/            DESIGN.md · COMPATIBILITY.md · SPEC_NOTES.md · img/
 HANDOFF.md, *.pdf, *.md      the specification documents this implements
@@ -115,17 +128,18 @@ HANDOFF.md, *.pdf, *.md      the specification documents this implements
 **Verified by CI** (GitHub Actions, `./gradlew build` on Ubuntu with JDK 21)
 
 * The Minecraft-facing classes compile against the real NeoForge 21.1.176 jars, and the mod jar is assembled.
-* All 94 tests pass: the 81 plain JUnit tests, and **13 that run inside the real game engine** (NeoForge's `unitTest` environment with its ephemeral server — an in-memory `MinecraftServer` whose data is loaded by Minecraft's own `WorldLoader`; nothing is written to disk, no server is started, no EULA is involved). Those check, on the real engine:
+* All 99 tests pass: the 81 plain JUnit tests, and **18 that run inside the real game engine** (NeoForge's `unitTest` environment with its ephemeral server — an in-memory `MinecraftServer` whose data is loaded by Minecraft's own `WorldLoader`; nothing is written to disk, no server is started, no EULA is involved). Those check, on the real engine:
   * the codecs and registries are registered; the Vantraya preset loads, is in `#minecraft:normal` (the creation screen's list), and its dimension, noise settings, density functions and biome role tags all load; the dimension survives the encode → decode round trip that saving `level.dat` performs; the `/vantraya` command tree is registered;
   * **the specification's own verification (`SpecVerifier`, 22 checks) passes on the live density-function engine for eight different world seeds**, and the world seed reaches the density functions;
   * real chunks from `fillFromNoise` at all nine landmarks: ground within ±1 of the specified Y, rock to the bottom, air at the build limit; the Obsidian Throne is obsidian; the Caldera holds no open water and gets lava on its floor; steep faces keep no soil; the abyss is deep sea;
-  * the biome source, driven by the real `Climate.Sampler`, places a specified biome at every landmark centre.
+  * the biome source, driven by the real `Climate.Sampler`, places a specified biome at every landmark centre;
+  * **a data pack's own `minecraft:overworld` replaces the chosen world type in vanilla** (a control), **and the Vantraya overworld is kept** — also when the world is loaded again from `level.dat` — while a pack's Nether still wins and a pack that configures Vantraya itself still wins.
 * What running it that way found and fixed: terrain 2–4 blocks too high at landmark centres (vanilla's density bend interpolated upward — see [DESIGN §4](docs/DESIGN.md#4-how-minecraft-is-made-to-build-it)); the slope-aware surface table and the Caldera's lava being applied one block too low; a vanilla cave entrance opening a 17-block pit in the Hermit's Spire's pinned top (landmark centres are now kept free of surface cave entrances); and a server-start NPE that could only happen on a server with no levels.
 
 **Not verified — please check on first run**
 
 * **Play.** The in-engine tests cannot reach a player in a world: the vanilla surface-rule pass (`buildSurface` needs a `WorldGenRegion`; the painter is called directly instead), feature decoration, structure placement, mob spawning, the world creation *screen* (client UI) and the spawn placement are untested, and `/vantraya` is checked to be registered, not executed. `/vantraya verify` is the first thing to run in a new Vantraya world; if the world fails to load, the log lines starting with `Vantraya:` and the first exception are what is needed.
-* **Interaction with the companion mods** has been designed for, not tested — none of them could be downloaded in my environment.
+* **Interaction with the companion mods.** The one real run so far (Lithosphere and Still Life as mods) failed on the dimension override and led to the fix above; the fix is tested against a *simulated* pack, because none of the companion mods can be downloaded here. Everything else about them — Still Life's biomes joining the role tags, Tectonic's snow line, Lithostitched modifiers — is designed for and unconfirmed.
 
 **Deliberate differences from the offline generator** (and from the documents): see [`docs/DESIGN.md`](docs/DESIGN.md#5-what-is-different-from-the-offline-generator-and-why) and [`docs/SPEC_NOTES.md`](docs/SPEC_NOTES.md) — the global stages (erosion, hydrology, rain shadow) are replaced by local equivalents, a few specification ambiguities were resolved with documented defaults, and not-yet-specified things (structures, the giant fungal trees) are left to the mods, as in the handoff.
 

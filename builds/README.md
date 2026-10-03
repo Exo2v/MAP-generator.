@@ -12,7 +12,9 @@ vantraya-builder-neoforge-1.21.1-<version>.jar
 1. A **NeoForge 1.21.1** instance (Java 21). It is compiled against NeoForge 21.1.176; any 21.1.x should do.
 2. Copy the jar into the instance's `mods/` folder — on the client and on the server.
 3. *Create New World → World → World Type → **Vantraya***. Dedicated server: `level-type=vantraya_builder:vantraya` in `server.properties`.
-4. In the new world, `/vantraya verify` re-checks the specification's landmarks against what was actually generated.
+4. In the new world, check that **F3** shows a line starting `Vantraya:`, then run `/vantraya verify`: it re-checks the specification's landmarks against what was actually generated.
+
+**Updating:** delete the old jar from `mods/` first — two versions of one mod stop the game from starting — and create a **new** world; a world keeps what it was made with.
 
 Lithosphere, Still Life, Tectonic and Lithostitched are optional; none of them is needed. How Vantraya Builder works next to them is in [`docs/COMPATIBILITY.md`](../docs/COMPATIBILITY.md).
 
@@ -23,6 +25,11 @@ Lithosphere, Still Life, Tectonic and Lithostitched are optional; none of them i
 * The build is reproducible: the same sources give the same bytes, so a rebuild of unchanged sources changes nothing in this folder.
 * Only **one** jar is kept here, always the newest. Two versions of one mod in `mods/` stop the game from starting.
 
-## Not yet play-tested
+## Played once so far
 
-The tests prove the landmarks, elevations, climate tiers and the surface table, but nobody has walked around a Vantraya world in the game yet — see "Not verified" in the [README](../README.md#status-and-known-limits). If something is wrong, `/vantraya verify` and the lines of `latest.log` that start with `Vantraya:` are what is needed to fix it.
+The tests prove the landmarks, elevations, climate tiers and the surface table. The one real game so far (a pack with Lithosphere and Still Life) found that another mod's overworld replaced the Vantraya world type; **0.1.1 fixes that**, and a second real run is still to be done — see [Troubleshooting](../README.md#troubleshooting) and "Not verified" in the [README](../README.md#status-and-known-limits). If something is wrong, `/vantraya where` and the lines of `latest.log` that start with `Vantraya:` are what is needed.
+
+## Versions
+
+* **0.1.1** — a data pack's own `minecraft:overworld` no longer replaces the Vantraya world type; `/vantraya where` and the log say which generator a world uses; optional `preselectWorldType` (client config, off by default); the mod now declares Minecraft 1.21.1 / NeoForge 21.1.x only.
+* **0.1.0** — first build.

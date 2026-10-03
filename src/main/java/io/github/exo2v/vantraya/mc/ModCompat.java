@@ -21,11 +21,13 @@ import net.neoforged.neoforge.event.server.ServerStartingEvent;
  * Reports, when a server starts, which companion worldgen mods are present and which biomes they have
  * contributed to Vantraya's biome roles - so a pack author can see at a glance what is active.
  *
- * <p>How Vantraya works alongside Lithosphere, Tectonic, Still Life and friends is by construction rather
- * than by code: see {@code docs/COMPATIBILITY.md}. In short, the Vantraya world type owns its own dimension
- * type, noise settings and generator (so nothing that rewrites {@code minecraft:overworld} can clash with
- * it), uses vanilla-namespace biomes that any biome-feature mod already decorates, and exposes one biome
- * tag per role for other mods' biomes to join.
+ * <p>How Vantraya works alongside Lithosphere, Tectonic, Still Life and friends: see
+ * {@code docs/COMPATIBILITY.md}. In short, the Vantraya world type owns its own dimension type, noise
+ * settings and generator (so a replacement of {@code minecraft:overworld}'s <em>noise settings</em> cannot
+ * reach it), uses vanilla-namespace biomes that any biome-feature mod already decorates, and exposes one
+ * biome tag per role for other mods' biomes to join. A pack's own {@code minecraft:overworld}
+ * <em>dimension</em> is a different matter - vanilla lets it beat the world type - and is handled by
+ * {@link WorldTypePriority} (COMPATIBILITY.md section 0).
  */
 public final class ModCompat {
     private ModCompat() {
