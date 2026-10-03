@@ -171,3 +171,40 @@ Multi-biome role tags (Still Life's biomes later joining a role) keep the patch 
 | P4 | Docs, version 0.1.3, jar | — |
 
 P1 and P2 are independent and can land together. Nothing here changes the specification's pins, the climate tiers, the surface table, or the structure policy. The two designs above are what I intend to build; if you want a different balance — say, larger rivers, more lakes, harder landmark edges — say so and I'll adjust before P1 goes in.
+## 6. 0.3.0 — the rework onto vanilla's pipeline (fourth play test, "only these puddles")
+
+The fourth session's document — **"Rivers aren't spawning only these puddles in the ground that are buggy and broken"** — came with eight screenshots and four demands: *rework the Perlin-noise map system; generate organically while keeping the lore-necessary specifications; get TerraBlender to work at all costs; rework how rivers and waterways spawn using other mods that already do that as reference.* This section records what the screenshots showed, why the v3 design above still failed on screen, and the architecture that replaced it.
+
+### 6.1 What the screenshots actually showed
+
+| # | What | Cause |
+|---|---|---|
+| P1 | Dozens of small ponds scattered over the plains, each with a sand rim — the "puddles" | the fill rule treated every depression the priority-flood found as a lake (`filled > natural + 0.10`), so tiny pits became "lakes" everywhere |
+| P2 | Dry ravine cuts and cracks with no water in them | `channel = !lake && …` excluded the lake-marked cells, breaking channels into fragments that the single-waterY fill could not span |
+| P3 | Water stair-stepping down slopes in places | the per-reach waterY met fragments of different reach lengths |
+| P4 | Topographic **contour terraces** across the whole landscape (concentric rings, exposed dirt risers) | the analytic dem: a linear radial island profile + windowed smoothers, quantised into steps by the block grid |
+
+P4 is the deepest lesson: no matter how the water was arranged, the *terrain* was an analytic formula, and its quantised contours dominated the look. Vanilla and Tectonic get organic terrain because height is a **spline of smooth parameter maps** — geometry with continuous derivatives, sampled from multi-octave noise. That is the "Perlin-noise map system" the document asks to rework toward.
+
+### 6.2 The 0.3.0 architecture
+
+**Terrain = vanilla's spline stack, our parameter maps.** The 1.21.1 `overworld/offset`, `factor`, `jaggedness`, `depth`, `sloped_cheese` and `base_3d_noise` density functions (read from the game data verbatim) now live in the mod's data, with their spline coordinates pointed at `vantraya_builder:field/*` — the six specification maps. The analytic dem, the carvers, the terraces, the drainage lattice and every post-pass are deleted (§4's v3 design and §5's classifier are **superseded** by this section; what survives of them is the *invariants* below). Each map means what vanilla means by it:
+
+* **continents** — the island (warped radial coast + shelf spline + landmark `cont` windows). Vanilla's bands do the rest: ocean, coast, near/mid/far inland; the Sunken Reach's window sits in the mushroom-fields band, where the specification wants its reef.
+* **erosion** — relief class (low = dramatic, high = flat), windowed per landmark.
+* **ridges** — the peaks-and-valleys map. **Its zero contour is the river network.** The offset spline dips where `ridges ≈ 0` (vanilla's "valleys" band), the biome builder calls that band `river`, and the valleys always run from high continentalness toward the sea — downhill to the coast by construction, joining and forking where noise contours join and fork (§3.3's coarse-network-first rule, for free). Peaks at `|ridges| ≈ 0.8` with low erosion are the mountain bands — the Spine's window sits exactly there.
+* **temperature / humidity** — the latitude + advection climate maps, windowed per landmark (the Glacial Spine frozen, the Dunes hot and dry, the Fen lush).
+
+**Biomes = vanilla's multi-noise overworld builder on those maps** (`multi_noise` + `preset: minecraft:overworld`). This is the document's "get TerraBlender to work at all costs": the world uses the vanilla biome builder, so TerraBlender regions (Biomes O' Plenty, Still Life's or any pack's) apply to a Vantraya world exactly as to a vanilla one, and borders are vanilla's nearest-parameter curves — §3.6's earlier conclusion ("TerraBlender cannot be bolted on") was true only for the custom biome source that is now gone. The nine landmarks' biomes come out of the climate windows landing in the right cells of the vanilla table (frozen peaks at the Spine, badlands at the Quarry, swamp at the Fen, cherry grove as the plateau variant at the Choir, mushroom fields at the Reach); a few specification names have no overworld-list entry (basalt deltas at the caldera, mangrove at the Fen) and are accepted as their nearest stand-ins — a TerraBlender region can pin those exactly later.
+
+**Water = the carved band plus one sheet.** Aquifers fill everything below sea level (ocean, coastal river mouths, caves) as vanilla does. Above sea level, `UplandWater` lays the sheet: one continuous surface per reach (a **min-filter** of the bed over a 64-block window — it cannot staircase, and it spills as a waterfall wherever the bed drops), placed only where `|ridges| < 0.06` — the same band that carved the channel, so carve and fill cannot disagree (M3's rule) and nothing is wet outside a valley (P1's puddles cannot return: there is no pit-filling rule at all). This is the study's invariants (§3.2: sources, downhill, joins, mouth; §3.5: one field for ground and water) implemented minimally.
+
+**The Ashen Caldera** is the one landmark with a shape in the maps rather than a window: a Gaussian ring anomaly in `ridges` (peaks at r ≈ 430, a flat valley-band floor inside), so the spline stack carves a real crater — rim, throne plateau, and no pins anywhere.
+
+### 6.3 What the landmarks' windows mean now, and the recalibration
+
+The `cont`/`erosion`/`ridges` windows of `Spec.LANDMARKS` are the terrain knobs of the spline stack, so 0.3.0 recalibrated their amplitudes against measured response (`RouterTest` holds the acceptance: every landmark's centre region has a median height inside its zone). The windows keep their specification meaning and sign; only the amplitudes moved to where the vanilla splines answer with the specified elevation bands. That is the "keeping our lore necessary specifications" part of the document: place, name, climate character and **elevation band** per landmark — zones, not pins.
+
+### 6.4 Acceptance, restated
+
+`RouterTest` (offline, no engine): the stack resolves; the ocean is ocean and the interior land; every landmark's median sits in its zone; river-valley columns sit below their ridge-band neighbours and the lowest reach the water; the terrain moves in one-block steps, never terraces. `InEngineWorldgenTest` (real engine): real chunks at valley sites carry water and chunks outside the band carry none; the specification verifier runs on the live generator for seven world seeds; the biome source is the vanilla builder and can answer the landmarks. The screenshots' four complaints each have a named counter-rule above (P1→no pit rule + band gating, P2→one band one sheet, P3→min-filter surface, P4→spline terrain).

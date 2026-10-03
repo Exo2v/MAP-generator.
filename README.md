@@ -35,8 +35,8 @@ The data below is the specification (`HANDOFF.md` §3, the master specification 
 
 * **Shape.** A coast radius that varies with compass bearing (the continent reaches furthest north, closest in the south-west), a Hermite shelf dropoff beyond r = 3300 and the brine abyss beyond r = 3550 (the specification's *H_drop = −600·S(t)*, clamped at the abyss floor Y = −32).
 * **Climate.** The five tiers of the spec, `T_eff = T_base − 0.0055·max(0, y − 62)`, per-landmark temperature/humidity windows — plus the spec's *mandatory 600-block non-snowy boreal belt* around the Glacial Spine, which the offline generator never enforced.
-* **Surface.** The slope-aware table — grass < 25°, coarse dirt/podzol on 40 % of 25–35° columns, scree on 35–45° (5 % mossy boulders), bare granite above 45°, snow/calcite above the Y = 225 treeline, volcanic rock throughout the caldera, black-glass dune crests, salt crust on the Veil floor. Trees need soil, so this is what keeps vegetation (vanilla's or any mod's) off cliffs and summits.
-* **Water.** Rivers and lakes carved into the lowlands (valleys strongest where the ridges field is ≈ 0), no ponds on the dry landforms, **no water at all inside the caldera**, where the crater floor gets lava basins instead.
+* **Surface.** Vanilla's own surface rules, driven by the biome the vanilla multi-noise builder picks at each column — grass, badlands terracotta, snow, sand and stone exactly as vanilla paints them (and any surface-rule mod can replace them).
+* **Water.** The river network is a noise map: wherever the ridges field is ≈ 0 the terrain splines carve a valley and the biome builder calls it *river*, and one continuous sheet of water lies on that bed — at sea level near the coast and **at altitude in the uplands** (the waterways the specification asks for). Valleys are the only wet ground away from the sea: there is no pond-filling rule.
 * **Seeds.** The world seed varies coastline, relief, river courses and the Glacial Spine's peak layout; the landmarks never move. `canonicalWorld = true` always builds the shipped Ashenfall continent. Seed comparison: [`docs/img/vantraya-seeds.png`](docs/img/vantraya-seeds.png).
 
 ## Commands
@@ -48,7 +48,7 @@ The data below is the specification (`HANDOFF.md` §3, the master specification 
 | `/vantraya locate <landmark>` | everyone | centre, box and elevation of a landmark |
 | `/vantraya tp <landmark>` | ops | teleport to a landmark |
 | `/vantraya verify` | ops | **acceptance test of the running world**: reads the real generator and noise router (not the model) and checks every landmark's elevation and biome, the caldera's throne/floor/rim, the spawn, and the Veil floor |
-| `/vantraya biomes <namespace>` | ops | list a mod's biome IDs — for adding them to a [biome role tag](docs/COMPATIBILITY.md#adding-another-mods-biomes) |
+| `/vantraya biomes <namespace>` | ops | list a mod's biome IDs — which ids the vanilla biome builder can answer |
 
 F3 shows a `Vantraya:` line with the landmark, height, climate tier and the density fields at the cursor.
 
@@ -60,8 +60,6 @@ F3 shows a `Vantraya:` line with the landmark, height, climate tier and the dens
 |---|---|---|
 | `canonicalWorld` | `false` | `true`: ignore the world seed, always build the shipped Ashenfall continent |
 | `spawnAtForgottenCoast` | `true` | start new worlds at the specification's spawn |
-| `paintSurface` | `true` | apply the slope-aware surface table after the biome surface rules |
-| `keepCalderaDry` | `true` | drain the crater and pour its lava basins |
 | `enforceWorldBorder` | `false` | 8,000-block border centred on the origin, applied once to a fresh world |
 | `logCompatReport` | `true` | log detected companion mods and data packs and biome-tag contributions at server start |
 | `preselectWorldType` | `false` | client: open the Create New World screen with the Vantraya world type already chosen (it can still be switched back) — for a modpack built around this world |
@@ -73,10 +71,10 @@ Lithosphere and Tectonic each replace `minecraft:overworld`'s noise settings; St
 **One more thing had to be handled, and was missed at first.** In Minecraft a data pack's `dimension/overworld.json` beats the world type the player picked, so a mod that replaces the whole overworld silently switches *every* world type off. That is what the first real game showed: Vantraya was chosen on the Create New World screen and the world came out as the other mods'. Vantraya Builder now carries one small mixin (`WorldDimensionsMixin`) that keeps a pack's overworld out of the merge **only when the world's overworld is Vantraya's** — other world types, the Nether and the End are untouched. It is tested in CI against a simulated pack ([COMPATIBILITY §0](docs/COMPATIBILITY.md#0-what-the-first-real-game-showed)); it has still to be confirmed in the pack that showed the problem. What is shared:
 
 * **Everything keyed to vanilla biomes and tags** — biome modifiers that add features or spawns, structure mods (Towns and Towers, Dungeons and Taverns …) — applies, because Vantraya uses vanilla-namespace biomes.
-* **Biome role tags.** Each biome role (`temperate_forest`, `xeric_shrubland`, …) is a tag, `#vantraya_builder:biome/<role>`, holding the vanilla default. Add Still Life's (or Biomes O' Plenty's …) biomes to a tag and Vantraya spreads them over exactly the places that role covers. `/vantraya biomes <namespace>` lists the IDs.
+* **TerraBlender and every TerraBlender-based biome mod** (Biomes O' Plenty, and any pack's regions) — Vantraya's biome source is the vanilla multi-noise overworld builder, so regions registered by those mods apply to a Vantraya world exactly as to a vanilla one. This is the requirement the fourth play test set ("get terrablender to work at all costs"), and it is why the custom biome source is gone.
 * **Lithostitched** worldgen modifiers that target the overworld level stem should apply to Vantraya's overworld (expected; untested).
 
-**Who decorates.** The handoff's export contract was "the mods decorate, vanilla does not". A live world has no deferred decoration step, so by default Vantraya places **vanilla biomes and vanilla's own features run**. To let Still Life (or another biome mod) decorate *instead*, put its biomes into the role tags with `"replace": true` — [how](docs/COMPATIBILITY.md#adding-another-mods-biomes). Its biome IDs are not in this repository (unknown to me), so that mapping is yours to supply; `/vantraya biomes <namespace>` lists them.
+**Who decorates.** Vantraya places vanilla biomes chosen by the vanilla builder from the specification's climate maps (frozen peaks at the Spine, badlands at the Quarry, swamp at the Fen, cherry grove at the Choir …), so vanilla's features — and every mod that decorates vanilla biomes — run as usual. Biome mods that work through TerraBlender bring their own biomes into the same selection.
 
 Details, the exact facts about each mod, and what is *not* done are in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). The short honest version: Vantraya's *terrain* is the specification's, not Lithosphere's or Tectonic's; their terrain shaping is not borrowed because it would break the specification's exact elevations.
 
@@ -106,13 +104,73 @@ CI (`.github/workflows/build.yml`) does `./gradlew build`, uploads the jar as a 
 
 ```
 src/main/java/io/github/exo2v/vantraya/
-  core/   the specification as pure Java: Spec (tables), VantrayaModel (the continent), Landforms, Instances,
-          BiomeLogic, SurfaceLogic, SpecVerifier ... — no Minecraft imports
-  mc/     the thin Minecraft layer: VantrayaField (density function), VantrayaChunkGenerator,
-          VantrayaBiomeSource, SurfacePainter, CalderaFluids, VantrayaCommand, config, spawn
-src/main/resources/data/vantraya_builder/   world preset, noise settings, density functions, dimension type, biome role tags
-src/test/        72 + 14 + 20 tests (spec tables, Java-vs-Python parity, model invariants, router JSON evaluation, in-engine world type)
-scripts/generate_data.py   regenerates the worldgen JSON from vanilla 1.21.1 data
+  core/   the specification as pure Java: Spec (tables + parameter windows), VantrayaModel (the six noise
+          maps), SpecVerifier, Regions, Noise, Tables ... — no Minecraft imports
+  mc/     the thin Minecraft layer: VantrayaField (density function), VantrayaChunkGenerator, UplandWater
+          (the river sheet), StructurePolicy, WorldTypePriority, VantrayaCommand, config, spawn
+src/main/resources/data/vantraya_builder/   world preset, noise settings, the vanilla spline stack as data
+          (offset / factor / jaggedness / depth / sloped_cheese), the field density functions, dimension type
+src/test/        spec tables, the parameter maps, the spline-stack acceptance (RouterTest), in-engine world type
+scripts/generate_data.py   regenerates the spline-stack data from vanilla 1.21.1
+docs/            DESIGN.md · COMPATIBILITY.md · SPEC_NOTES.md · img/
+HANDOFF.md, *.pdf, *.md      the specification documents this implements
+```
+
+## Status and known limits
+
+**Verified here**
+
+* The terrain is vanilla's own spline geometry over the specification's parameter maps: `RouterTest` evaluates the shipped JSON through an independent interpreter and shows the ocean is ocean, the interior is land, every landmark's region holds its elevation zone (medians across the region, not pins), river-valley columns sit below their ridge-band neighbours, the deepest beds reach the water, and the surface moves in one-block steps - no contour terraces.
+* Every landmark keeps its place, climate character and elevation band across seeds. **Zones, not pins** (0.2.0) and **organic noise-map terrain** (0.3.0) are both standing rules; the parameter windows are the knobs and the bands are the acceptance.
+* The world type's JSON is internally consistent (all references resolve; the spline stack is vanilla's data with the coordinates re-pointed at the fields).
+
+**Verified by CI** (GitHub Actions, `./gradlew build` on Ubuntu with JDK 21)
+
+* The Minecraft-facing classes compile against the real NeoForge 21.1.x jars, and the mod jar is assembled.
+* The full test suite passes — plain JUnit plus tests **inside the real game engine** (NeoForge's `unitTest` environment with its ephemeral server — an in-memory `MinecraftServer` whose data is loaded by Minecraft's own `WorldLoader`; nothing is written to disk, no server is started, no EULA is involved). Those check, on the real engine:
+  * the codecs and registries are registered; the Vantraya preset loads, is in `#minecraft:normal` (the creation screen's list), and its dimension, noise settings and density functions all load; the dimension survives the encode → decode round trip that saving `level.dat` performs; the `/vantraya` command tree is registered;
+  * **the specification's own verification (`SpecVerifier`) passes on the live generator for several world seeds** — landmark zones, the caldera as a rim around its throne plateau, the spawn dry, the Veil abyss in band — and the world seed reaches the density functions;
+  * real chunks from `fillFromNoise`: **valley sites in the uplands carry their sheet of water**, the abyss beyond the Veil is deep sea, rock goes to the bottom of the world;
+  * the biome source is the vanilla multi-noise builder and serves every landmark's specified biomes (with documented stand-ins for the few the overworld list lacks);
+  * **a data pack's own `minecraft:overworld` replaces the chosen world type in vanilla** (a control), **and the Vantraya overworld is kept** — also when the world is loaded again from `level.dat` — while a pack's Nether still wins and a pack that configures Vantraya itself still wins;
+  * **the structure policy reads vanilla's own structure files**: fortresses and nether portals are recognized as Nether structures and never generate in a Vantraya world, villages are not, and ruined portals may stand in rivers.
+
+**Play sessions so far.** The first real game found another mod's overworld replacing the world type (fixed in 0.1.1); the second found jagged, illogical rivers and boxy biome borders; the third still found them problematic (0.2.0: zones, not pins). The fourth showed the deeper truth - "rivers aren't spawning, only these puddles" with contour terraces everywhere - and asked for the Perlin-noise map system to be reworked into organic generation with the lore kept, TerraBlender working, and rivers done the way the studied mods do them. **0.3.0 is that rework**: the whole generator now runs on vanilla's spline pipeline over the specification's noise maps, and it is what the next play run should test. [`docs/RIVERS_AND_BIOME_BORDERS.md`](docs/RIVERS_AND_BIOME_BORDERS.md) (especially §6) records the analysis and the design.
+
+## Troubleshooting
+
+**The world looks like ordinary Minecraft (or like Lithosphere / Still Life), not like Vantraya.** Three checks, a few seconds each:
+
+1. **F3.** In a Vantraya world the debug screen has a line starting `Vantraya:` (landmark, height, climate tier). No such line: the world was not generated by Vantraya.
+2. **`/vantraya where`.** *Unknown or incomplete command* means the jar is not loaded (wrong `mods` folder or instance, or not Minecraft 1.21.1 with NeoForge 21.1.x). *This dimension is not generated by the Vantraya world type (it uses …)* means the jar is loaded but this world's overworld came from somewhere else.
+3. **`logs/latest.log`**, search for `Vantraya:`. One line says which generator the overworld uses; another (`a data pack defines its own minecraft:overworld …`) appears whenever the guard above had to keep a pack's overworld out.
+
+A world is decided when it is **created**: a world made before an update keeps what it was made with, so create a new one (World Type → Vantraya) to see the effect of an update. If it still fails, the `Vantraya:` lines of `latest.log` and the output of `/vantraya where` are what is needed.
+
+## Building
+
+Requires JDK 21.
+
+```bash
+./gradlew build          # compile, run all tests, then put vantraya-builder-neoforge-1.21.1-<version>.jar in builds/ (and build/libs/)
+./gradlew runClient      # dev client
+./gradlew runServer      # dev server
+```
+
+CI (`.github/workflows/build.yml`) does `./gradlew build`, uploads the jar as a workflow artifact and — for a push on which every test passed — commits it to [`builds/`](builds/), so the jar in the repository is always one that passed its tests ([`builds/README.md`](builds/README.md) says how to tell which source it was built from). The specification model (`io.github.exo2v.vantraya.core`) is plain Java without any Minecraft dependency, so its tests also run with a bare JDK and JUnit 4. The in-engine tests (`src/test/java/.../engine`) need the real game jars, so they run only under Gradle (`./gradlew test`); they start an in-memory server — no Minecraft EULA, no world on disk.
+
+## Repository layout
+
+```
+src/main/java/io/github/exo2v/vantraya/
+  core/   the specification as pure Java: Spec (tables + parameter windows), VantrayaModel (the six noise
+          maps), SpecVerifier, Regions, Noise, Tables ... — no Minecraft imports
+  mc/     the thin Minecraft layer: VantrayaField (density function), VantrayaChunkGenerator, UplandWater
+          (the river sheet), StructurePolicy, WorldTypePriority, VantrayaCommand, config, spawn
+src/main/resources/data/vantraya_builder/   world preset, noise settings, the vanilla spline stack as data
+          (offset / factor / jaggedness / depth / sloped_cheese), the field density functions, dimension type
+src/test/        spec tables, the parameter maps, the spline-stack acceptance (RouterTest), in-engine world type
+scripts/generate_data.py   regenerates the spline-stack data from vanilla 1.21.1
 docs/            DESIGN.md · COMPATIBILITY.md · SPEC_NOTES.md · img/
 HANDOFF.md, *.pdf, *.md      the specification documents this implements
 ```
