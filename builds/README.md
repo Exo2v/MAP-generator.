@@ -51,12 +51,13 @@ Beyond 3550 blocks from the origin lies the **Veil of Salt**: deep ocean, an aby
 * The build is reproducible: the same sources give the same bytes, so a rebuild of unchanged sources changes nothing in this folder.
 * Only **one** jar is kept here, always the newest. Two versions of one mod in `mods/` stop the game from starting.
 
-## Played once so far
+## Played twice so far
 
-The tests prove the landmarks, elevations, climate tiers and the surface table. The one real game so far (a pack with Lithosphere and Still Life) found that another mod's overworld replaced the Vantraya world type; **0.1.1 fixes that**, and a second real run is still to be done — see [Troubleshooting](../README.md#troubleshooting) and "Not verified" in the [README](../README.md#status-and-known-limits). If something is wrong, `/vantraya where` and the lines of `latest.log` that start with `Vantraya:` are what is needed.
+The first game found another mod's overworld replacing the Vantraya world type (fixed in 0.1.1); the second found jagged, illogical rivers and boxy biome borders (redesigned in 0.1.3, see `docs/RIVERS_AND_BIOME_BORDERS.md`). A third real run is to be done. If something is wrong, `/vantraya where`, `/vantraya verify` and the lines of `latest.log` that start with `Vantraya:` are what is needed.
 
 ## Versions
 
+* **0.1.3** — the river and biome-border overhaul from the play-test document: rivers are real drainage (water surfaces run downhill, channels join and widen and end at sea/lake/playa mouths, lakes are basins at their spill level, no flooded valleys), and biome borders wander in fractal curves - the 64-block squares are gone, landmark seams are feathered with a climate buffer. See `docs/RIVERS_AND_BIOME_BORDERS.md`.
 * **0.1.2** — from the second play session: no more Nether structures in the overworld (the nether fortress by the caldera) and no structures standing in rivers; biome borders blend in patches instead of "very stark borders"; rivers and lakes carry real water up into the highlands (Y ≈ 150), so the continent can be travelled by water. New options `fillRivers` and `structurePolicy`.
 * **0.1.1** — a data pack's own `minecraft:overworld` no longer replaces the Vantraya world type; `/vantraya where` and the log say which generator a world uses; optional `preselectWorldType` (client config, off by default); the mod now declares Minecraft 1.21.1 / NeoForge 21.1.x only.
 * **0.1.0** — first build.

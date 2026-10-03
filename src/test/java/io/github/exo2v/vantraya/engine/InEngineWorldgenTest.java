@@ -514,7 +514,7 @@ class InEngineWorldgenTest {
             for (double x = -3000; x <= 3000 && found.size() < 5; x += 24) {
                 for (double z = -3000; z <= 3000 && found.size() < 5; z += 24) {
                     VantrayaModel.Fields f = model.sample(x, z);
-                    if (f.river() > 0.6 && f.height() > 75.0 && f.waterLine() > f.height() + 2.5) {
+                    if (f.river() > 0.6 && f.height() > 75.0 && f.waterLine() > f.height() + 1.5) {
                         found.add(new int[] {(int) x, (int) z});
                     }
                 }

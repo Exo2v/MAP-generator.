@@ -15,9 +15,10 @@ import net.minecraft.world.level.chunk.ChunkAccess;
  * The first play test called that "a critical lack of waterways": the continent had valleys but no water in
  * them, and travel by river was impossible.
  *
- * <p>This pass fills every channel the model carves up to the water surface the model chose
- * ({@link VantrayaModel.Fields#waterLine}), two blocks under the natural ground of the bed, with a floor a few
- * blocks under that. Cold channels freeze over. Like the caldera's fluids it runs right after the noise fill,
+ * <p>The model's {@link io.github.exo2v.vantraya.core.Drainage} lattice gives every channel and lake one
+ * continuous water surface per reach ({@link VantrayaModel.Fields#waterLine}), already carved to a smooth
+ * cross-section; this pass fills up to it. Cold channels freeze over. Like the caldera's fluids it runs
+ * right after the noise fill,
  * so surface rules, the slope-aware surface painter and decoration all see the finished water; aquifers and
  * caves underground are left alone, and the caldera and the dry basins stay dry.
  */

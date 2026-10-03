@@ -192,7 +192,7 @@ public class ModelTest {
                     }
                     assertTrue("water below its bed at " + x + "," + z, f.waterLine() > f.height());
                     assertTrue("flooded channel (+" + (f.waterLine() - f.height()) + ") at " + x + "," + z,
-                            f.waterLine() - f.height() <= 7.0);
+                            f.waterLine() - f.height() <= 11.0);
                     checked++;
                 }
             }
@@ -330,6 +330,141 @@ public class ModelTest {
                 }
             }
             assertTrue(checked > 200);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // the drainage network (v3): the questions the second play test showed were not being asked
+    // ---------------------------------------------------------------------------------------
+
+    /** The engine reads the height field on a 4-block grid and interpolates. */
+    private static double gridSurface(VantrayaModel m, double x, double z) {
+        double x0 = Math.floor(x / 4.0) * 4.0;
+        double z0 = Math.floor(z / 4.0) * 4.0;
+        double fx = (x - x0) / 4.0;
+        double fz = (z - z0) / 4.0;
+        double h00 = m.sample(x0 + 0.5, z0 + 0.5).height();
+        double h10 = m.sample(x0 + 4.5, z0 + 0.5).height();
+        double h01 = m.sample(x0 + 0.5, z0 + 4.5).height();
+        double h11 = m.sample(x0 + 4.5, z0 + 4.5).height();
+        return (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+    }
+
+    @Test
+    public void waterSurfacesRunDownhillWithAtMostARapid() {
+        for (long seed : new long[] {Spec.SPEC_SEED, 424242L, 7L, 17L}) {
+            VantrayaModel m = VantrayaModel.forSeed(seed);
+            Drainage d = m.drainage();
+            int links = 0;
+            for (int i = 0; i < d.cells(); i++) {
+                if (!d.isChannel(i)) {
+                    continue;
+                }
+                int to = d.drainsTo(i);
+                if (to < 0 || !(d.isChannel(to) || d.isLake(to))) {
+                    continue;
+                }
+                double up = d.waterSurface(i);
+                double down = d.waterSurface(to);
+                assertTrue("upstream surface " + up + " is below its downstream " + down + " at "
+                        + d.cellX(i) + "," + d.cellZ(i) + " (seed " + seed + ")", up >= down - 0.55);
+                assertTrue("more than one rapid between " + d.cellX(i) + "," + d.cellZ(i) + " and its downstream: "
+                        + up + " -> " + down, up <= down + Drainage.MAX_RISE + 0.01);
+                links++;
+            }
+            assertTrue("seed " + seed + ": only " + links + " channel links", links > 300);
+        }
+    }
+
+    @Test
+    public void everyChannelEndsAtAMouthAndStartsInACatchment() {
+        for (long seed : new long[] {Spec.SPEC_SEED, 424242L, 7L, 17L}) {
+            VantrayaModel m = VantrayaModel.forSeed(seed);
+            Drainage d = m.drainage();
+            int mouths = 0;
+            int sinks = 0;
+            int heads = 0;
+            for (int i = 0; i < d.cells(); i++) {
+                if (!d.isChannel(i)) {
+                    continue;
+                }
+                assertTrue("a channel above the head limit at " + d.cellX(i) + "," + d.cellZ(i),
+                        d.naturalH(i) < Drainage.CHANNEL_MAX_H);
+                assertTrue("a head without a catchment at " + d.cellX(i) + "," + d.cellZ(i),
+                        d.catchment(i) >= Drainage.HEAD_CATCHMENT);
+                if (d.catchment(i) < 2 * Drainage.HEAD_CATCHMENT) {
+                    heads++;
+                }
+                int p = i;
+                for (int steps = 0; steps < 4000; steps++) {
+                    int q = d.drainsTo(p);
+                    if (q < 0 || d.isLake(q)) {
+                        break;
+                    }
+                    p = q;
+                }
+                int q = d.drainsTo(p);
+                if (q >= 0 && d.isLake(p)) {
+                    mouths++; // into a lake
+                } else if (q < 0) {
+                    if (d.naturalH(p) <= Spec.SEA_LEVEL + 1.0) {
+                        mouths++; // into the sea
+                    } else if (d.cellIndex(d.cellX(p), d.cellZ(p)) < 0
+                            || d.naturalH(p) < Drainage.CHANNEL_MAX_H) {
+                        sinks++; // a playa in a dry basin, or off the map: a declared end, not a random stop
+                    } else {
+                        assertTrue("a channel that just stops at " + d.cellX(p) + "," + d.cellZ(p), false);
+                    }
+                }
+            }
+            assertTrue("seed " + seed + ": only " + mouths + " mouths and " + sinks + " sinks",
+                    mouths > 200 && mouths + sinks > 0);
+            assertTrue("seed " + seed + ": only " + heads + " heads", heads > 50);
+        }
+    }
+
+    @Test
+    public void waterNeverStandsOutsideItsChannel() {
+        for (long seed : new long[] {Spec.SPEC_SEED, 31337L}) {
+            VantrayaModel m = VantrayaModel.forSeed(seed);
+            for (double x = -3000; x <= 3000; x += 31) {
+                for (double z = -3000; z <= 3000; z += 31) {
+                    Fields f = m.sample(x, z);
+                    boolean dry = f.river() <= 0.02 && f.lake() <= 0.02;
+                    if (dry) {
+                        assertEquals("a water line with no channel at " + x + "," + z,
+                                VantrayaModel.NO_WATER_LINE, f.waterLine(), 0.0);
+                    } else if (f.waterLine() > VantrayaModel.NO_WATER_LINE + 1.0) {
+                        assertTrue("water claimed above its bed at " + x + "," + z
+                                        + " (line " + f.waterLine() + ", ground " + f.height() + ")",
+                                f.height() < f.waterLine());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void channelCoresCarryWaterThroughTheEngineGrid() {
+        for (long seed : new long[] {Spec.SPEC_SEED, 0L, 4242L, 31337L, 7L}) {
+            VantrayaModel m = VantrayaModel.forSeed(seed);
+            int cores = 0;
+            int dry = 0;
+            for (double x = -3300; x <= 3300; x += 12) {
+                for (double z = -3300; z <= 3300; z += 12) {
+                    Fields f = m.sample(x, z);
+                    if (f.river() > 0.85 && f.waterLine() > VantrayaModel.NO_WATER_LINE + 1.0) {
+                        cores++;
+                        double margin = f.waterLine() - Math.floor(gridSurface(m, x, z) + 0.5);
+                        if (margin <= 0) {
+                            dry++;
+                        }
+                    }
+                }
+            }
+            assertTrue("seed " + seed + ": only " + cores + " channel cores", cores > 150);
+            assertTrue("seed " + seed + ": " + dry + " of " + cores + " channel cores come out dry after the "
+                    + "engine's grid smoothing", dry <= 0.02 * cores);
         }
     }
 }

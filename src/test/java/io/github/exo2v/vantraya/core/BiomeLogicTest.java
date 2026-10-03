@@ -4,7 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -77,7 +79,9 @@ public class BiomeLogicTest {
         for (Landmark lm : Spec.LANDMARKS) {
             Set<String> allowed = new java.util.HashSet<>(lm.biomes());
             int land = 0;
-            int ok = 0;
+            int core = 0;
+            int band = 0;
+            int bandOk = 0;
             for (int i = 0; i < 400; i++) {
                 double x = lm.x1() + rnd.nextDouble() * (lm.x2() - lm.x1());
                 double z = lm.z1() + rnd.nextDouble() * (lm.z2() - lm.z1());
@@ -89,50 +93,82 @@ public class BiomeLogicTest {
                     continue; // shorelines and inland water are classified as such
                 }
                 land++;
-                if (allowed.contains(surface(m, x, z).vanilla())) {
-                    ok++;
+                boolean specified = allowed.contains(surface(m, x, z).vanilla());
+                double sd = Regions.sdOwned(Spec.LANDMARKS.indexOf(lm), x, z);
+                if (sd > BiomeLogic.SEAM_BAND) {
+                    core++;
+                    assertTrue(lm.key() + " deep inside its region got a foreign biome at " + (int) x + "," + (int) z,
+                            specified);
+                } else {
+                    band++;
+                    if (specified) {
+                        bandOk++;
+                    }
                 }
+                land++;
             }
-            if (lm.kind() != Kind.DROWNED_SHELF && land > 20) {
-                // 0.95, not 1.0: at a box's border the two sides alternate in patches (blending, asked for after
-                // the first play test), so a thin band of a landmark's edge takes the outside role.
-                assertTrue(lm.key() + " land columns with a specified biome: " + ok + "/" + land, ok >= 0.95 * land);
+            if (lm.kind() != Kind.DROWNED_SHELF && band > 10) {
+                // The seam band is a deliberate ecotone (the play test asked for borders that are not walls):
+                // the two sides interleave there in fractal blobs, but the landmark side stays the majority.
+                assertTrue(lm.key() + " seam band columns with the specified biome: " + bandOk + "/" + band,
+                        bandOk >= 0.5 * band);
             }
+            assertTrue(lm.key() + " core sampled", core == 0 || land > 20);
         }
     }
 
     @Test
-    public void bordersAreMottledNotWalls() {
-        // The Byzantine Choir's meadow gives way to cherry grove at Y = 126 (and back). Before blending, every
-        // column above the line was one biome and every column below the other - the "very stark borders" of the
-        // first play test. Now the line wanders and both sides occur in patches on it.
+    public void bordersWanderInsteadOfRunningStraight() {
+        // The Byzantine Choir's meadow gives way to cherry grove at Y = 126. Before blending that line was a
+        // wall; the squares of the second attempt were worse. Now the threshold itself is read through
+        // warped height, so the line wanders in a smooth, fractal way - vanilla's look. Measure the line:
+        // for each point across the region, the height at which the role flips.
         VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
         int choir = 8; // the Byzantine Choir (Spec.LANDMARKS order)
         assertEquals("byzantine_choir", Spec.LANDMARKS.get(choir).key());
-        int meadow = 0;
-        int cherry = 0;
-        for (double x = 1350; x <= 2250; x += 8) {
-            for (double z = -2250; z <= -1350; z += 8) {
-                if (Regions.idAt(x, z) != choir) {
-                    continue;
-                }
+        List<Double> flips = new ArrayList<>();
+        double stepSum = 0;
+        int steps = 0;
+        for (double z = -2150.0; z <= -1450.0; z += 116.0) {
+            double prev = Double.NaN;
+            for (double x = 1450.0; x <= 2150.0; x += 58.0) {
                 Fields f = m.sample(x, z);
-                if (f.height() < 120.0 || f.height() > 132.0) {
-                    continue;
+                double flip = Double.NaN;
+                for (double hs = 110.0; hs <= 146.0; hs += 0.25) {
+                    BiomeRole role = BiomeLogic.surfaceRole(x, z, hs, f.temperature(), f.humidity(),
+                            f.cont(), f.erosion());
+                    if (role == BiomeRole.CHERRY_GROVE) {
+                        flip = hs;
+                        break;
+                    }
                 }
-                BiomeRole role = BiomeLogic.surfaceRole(x, z, f.height(), f.temperature(), f.humidity(),
-                        f.cont(), f.erosion());
-                if (role == BiomeRole.MEADOW) {
-                    meadow++;
-                } else if (role == BiomeRole.CHERRY_GROVE) {
-                    cherry++;
+                if (!Double.isNaN(flip)) {
+                    flips.add(flip);
+                    if (!Double.isNaN(prev)) {
+                        stepSum += Math.abs(flip - prev);
+                        steps++;
+                    }
+                    prev = flip;
                 }
             }
         }
-        int both = meadow + cherry;
-        assertTrue("found " + both + " columns in the split band", both > 150);
-        assertTrue("meadow " + meadow + " of " + both + " on the cherry/meadow border - not blended", meadow > 0.15 * both);
-        assertTrue("cherry " + cherry + " of " + both + " on the cherry/meadow border - not blended", cherry > 0.15 * both);
+        int n = flips.size();
+        assertTrue("found " + n + " border columns", n >= 40);
+        double mean = 0;
+        for (double v : flips) {
+            mean += v;
+        }
+        mean /= n;
+        double var = 0;
+        for (double v : flips) {
+            var += (v - mean) * (v - mean);
+        }
+        double std = Math.sqrt(var / n);
+        // one warp amplitude of regional shift is allowed; over the whole region the warp averages to zero
+        assertTrue("the border sits at " + mean + " instead of near 126", Math.abs(mean - 126.0) < 4.5);
+        assertTrue("the border is flat (std " + std + " blocks) - still a wall", std > 1.0);
+        assertTrue("the border jitters per point (mean step " + stepSum / steps + " blocks over 58-block spacing)",
+                steps == 0 || stepSum / steps < 8.0);
     }
 
     @Test

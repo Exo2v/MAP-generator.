@@ -21,7 +21,12 @@ import io.github.exo2v.vantraya.core.Spec.Window;
  * <ul>
  *   <li>{@code windows()} percentile bounds -> {@link Calibration} constants;</li>
  *   <li>distance-transform feathers -> closed-form signed distances ({@link Regions});</li>
- *   <li>priority-flood / flow-accumulation rivers and lakes -> a river-valley and basin field that
+ *   <li>priority-flood / flow-accumulation rivers and lakes -> {@link Drainage}: the same two algorithms the
+ *       offline engine runs (priority flood for lakes, D8 flow accumulation for rivers), on a lattice per
+ *       world seed, so channels follow real drainage, water surfaces run downhill, and lakes are real
+ *       basins at their spill level - honouring the same rules (valleys where {@code R ~ 0} feed the
+ *       network, no standing water on dry landforms, absolutely no water in the caldera). The old
+ *       river-valley stand-in that
  *       honours the same rules (valleys where {@code R ~ 0}, no standing water on dry landforms,
  *       absolutely no water in the caldera);</li>
  *   <li>post-hydrology landmark re-pinning -> the same radius-220 pull, applied pointwise;</li>
@@ -111,6 +116,26 @@ public final class VantrayaModel {
                 : (ci < 0 ? List.of() : Instances.buildCordillera(Spec.LANDMARKS.get(ci), shaperSeed(ci)));
         this.needles = needlesOverride != null ? needlesOverride
                 : (si < 0 ? List.of() : Instances.buildNeedles(Spec.LANDMARKS.get(si), shaperSeed(si)));
+    }
+
+    /** The drainage lattice of this world, built once from the pre-water terrain and then queried. */
+    private volatile Drainage drainage;
+
+    public Drainage drainage() {
+        Drainage d = this.drainage;
+        if (d == null) {
+            synchronized (this) {
+                d = this.drainage;
+                if (d == null) {
+                    d = new Drainage((x, z) -> {
+                        Base b = base(x, z);
+                        return new Drainage.CellSample(b.dem(), b.noWater(), b.noLake());
+                    });
+                    this.drainage = d;
+                }
+            }
+        }
+        return d;
     }
 
     private static final ConcurrentHashMap<Long, VantrayaModel> CACHE = new ConcurrentHashMap<>();
@@ -289,7 +314,14 @@ public final class VantrayaModel {
     // compute
     // ---------------------------------------------------------------------------------------
 
-    private Fields compute(double x, double z) {
+    /** Everything the water network needs to know about a column, before any water is cut into it. */
+    private record Base(double dem, double demMacro, double cont, double ero, double rid,
+                        double tAshUnit, double hAshUnit, double c, int owner, double pinMask,
+                        boolean lava, boolean noWater, boolean noLake) {
+    }
+
+    /** Steps 1-6 of the model: climate and terrain, with no hydrology. The drainage lattice samples this. */
+    private Base base(double x, double z) {
         // ---- 1. continentalness -------------------------------------------------------------
         double[] warp = new double[2];
         Noise.domainWarp(x, z, 2100.0, 900.0, seed + 17, 4, warp);
@@ -418,20 +450,61 @@ public final class VantrayaModel {
         // ---- 6. dry masks (HANDOFF 5.11) ----------------------------------------------------
         boolean noWater = basinFlag || lava;
         boolean noLake = owner >= 0 && owner < lms.size() && isDryKind(lms.get(owner).kind());
+        return new Base(dem, demMacro, cont, ero, rid, tAshUnit, hAshUnit, c, owner, pinMask,
+                lava, noWater, noLake);
+    }
 
-        // ---- 7. rivers, lakes (runtime replacement for hydrology) ---------------------------
+    private Fields compute(double x, double z) {
+        Base b = base(x, z);
+        double dem = b.dem();
+        double demMacro = b.demMacro();
+        double cont = b.cont();
+        double ero = b.ero();
+        double rid = b.rid();
+        double tAshUnit = b.tAshUnit();
+        double hAshUnit = b.hAshUnit();
+        double c = b.c();
+        int owner = b.owner();
+        double pinMask = b.pinMask();
+        boolean lava = b.lava();
+        boolean noWater = b.noWater();
+        boolean noLake = b.noLake();
+        double r = Math.hypot(x, z);
+        List<Landmark> lms = Spec.LANDMARKS;
+
+        // ---- 7. rivers and lakes: the drainage network ---------------------------------------
         double river = 0.0;
         double lake = 0.0;
         double waterLine = NO_WATER_LINE;
         if (cfg.carveWater() && !noWater && r < Spec.SHELF_INNER) {
-            double[] wr = water(x, z, dem, rid, cont, noLake);
+            Drainage.At wa = drainage().at(x, z);
             // The specification gives every landmark centre an exact elevation, so water stays out of the pin
             // zone around it (the offline engine re-pins after hydrology; here the water simply never gets there).
             double keep = 1.0 - Mathx.smoothstep(0.0, 0.35, pinMask);
-            dem = dem + (wr[0] - dem) * keep;
-            river = wr[1] * keep;
-            lake = wr[2] * keep;
-            waterLine = wr[3];
+            if (wa.wet() && keep > 0.0 && wa.waterY() > NO_WATER_LINE + 1.0) {
+                waterLine = wa.waterY();
+                lake = noLake ? 0.0 : wa.lake() * keep;
+                if (river == 0.0 && lake == 0.0 && wa.lake() > wa.channel()) {
+                    waterLine = NO_WATER_LINE; // a dry landform keeps no pond, not even a bleeding edge
+                }
+                if (wa.lake() > wa.channel()) {
+                    // a real basin from the priority flood: the ground is already below the spill level,
+                    // so the lake needs no cut of its own - the fill pass puts the water in
+                    river = 0.0;
+                } else {
+                    double t = wa.dist() / Math.max(wa.halfWidth(), 1.0);
+                    double depth = 1.6 + 0.62 * wa.halfWidth();
+                    double u = 1.0 - t * t;
+                    double profile = u > 0.0 ? u * u : 0.0; // (1 - t^2)^2: a smooth U, flat at the edge
+                    double bed = wa.waterY() - 0.5 - depth * profile;
+                    if (t >= 1.0) {
+                        // outside the channel the ground rises away from it: the bank, not a wall
+                        bed = wa.waterY() + (wa.dist() - wa.halfWidth()) * 0.4;
+                    }
+                    dem = dem + (Math.min(dem, bed) - dem) * wa.channel() * keep;
+                    river = wa.channel() * (1.0 - Mathx.smoothstep(0.85, 1.15, t)) * keep;
+                }
+            }
         }
 
         // ---- 8. landmark re-pinning (HANDOFF 5.12) ------------------------------------------
@@ -463,7 +536,7 @@ public final class VantrayaModel {
         if (owner == cordilleraIdx || owner == spiresIdx) {
             rugged = Math.max(rugged, 0.9);
         }
-        double rough3d = (0.12 + 0.88 * rugged) * (1.0 - pinMask);
+        double rough3d = (0.12 + 0.88 * rugged) * (1.0 - pinMask) * (1.0 - 0.8 * river);
 
         // A water surface at or below the finished ground (re-pinning lifts it near a landmark) means the
         // channel is not cut here: this column is a bank and gets no water.
@@ -573,95 +646,8 @@ public final class VantrayaModel {
     // rivers and lakes
     // ---------------------------------------------------------------------------------------
 
-    /** The water surface of a channel sits this far below the natural ground of its bed. */
-    private static final double RIVER_INCISE = 2.0;
-    /**
-     * How far below the water surface the channel floors are cut. The engine reads the height field on a
-     * 4-block grid and interpolates, which shaves the top off a narrow notch: a shallow cut comes out dry on
-     * the far side of that smoothing (the second play test found channels with no water in them). The depths
-     * below leave water in every channel once the grid has had its way.
-     */
-    private static final double TRUNK_DEPTH = 6.0;
-    private static final double TRIB_DEPTH = 5.0;
-    private static final double LAKE_DEPTH = 5.0;
-
-    /** {@link Fields#waterLine} of a column with no channel in it. */
+    /** {@link Fields#waterLine} of a column with no water in it. */
     public static final double NO_WATER_LINE = -1.0E9;
-
-    /**
-     * Local stand-in for the offline hydrology: carve river valleys through the land and open lake basins in
-     * them. Rivers are the zero set of a domain-warped noise (they meander, join and end at the sea), strongest
-     * where the ridges field is near zero - the specification's "wide U-shaped river valleys at R ~ 0" - and
-     * absent on ridge crests.
-     *
-     * <p>A channel follows the terrain: its water surface sits {@link #RIVER_INCISE} blocks below the natural
-     * ground of the bed and the floor a few blocks below that, so a river runs downhill across the continent
-     * and carries real water (the {@code RiverWater} pass fills it to {@link Fields#waterLine}) instead of
-     * being a dry notch. Rivers reach up to about Y = 150 and lakes to about Y = 110 and fade out above
-     * (the first play test found the old lowland-only network a "critical lack of waterways"), and a
-     * closed-basin landform keeps its rivers but never its lakes.
-     *
-     * @return {@code {dem, riverStrength, lakeStrength, waterSurfaceY}}
-     */
-    private double[] water(double x, double z, double dem, double rid, double cont, boolean noLake) {
-        double low = 1.0 - Mathx.smoothstep(150.0, 190.0, dem);
-        if (low <= 0.0) {
-            return new double[] {dem, 0.0, 0.0, NO_WATER_LINE};
-        }
-        double line = dem - RIVER_INCISE;
-        double trunkBed = line - TRUNK_DEPTH;
-        double tribBed = line - TRIB_DEPTH;
-        double[] w = new double[2];
-        Noise.domainWarp(x, z, 900.0, 300.0, seed + 6001, 3, w);
-        double wx = w[0];
-        double wz = w[1];
-        double ridgeFactor = 1.0 - Mathx.smoothstep(0.30, 0.90, Math.abs(rid));
-        double seaward = Mathx.smoothstep(0.35, -0.05, cont);
-
-        // trunk rivers
-        double trunkDist = zeroSetDistance(wx, wz, 1500.0, seed + 6011);
-        double halfTrunk = 6.0 + 9.0 * seaward;
-        double s1 = ridgeFactor * low;
-        double t1 = trunkDist / halfTrunk;
-        double chan1 = (1.0 - Mathx.smoothstep(0.65, 1.25, t1)) * s1;
-        double val1 = (1.0 - Mathx.smoothstep(1.0, 3.4, t1)) * s1;
-
-        // tributaries (narrower)
-        double tribDist = zeroSetDistance(wx, wz, 650.0, seed + 6013);
-        double halfTrib = 3.5 + 2.0 * seaward;
-        double s2 = ridgeFactor * low * 0.85;
-        double t2 = tribDist / halfTrib;
-        double chan2 = (1.0 - Mathx.smoothstep(0.65, 1.25, t2)) * s2;
-        double val2 = (1.0 - Mathx.smoothstep(1.0, 3.0, t2)) * s2;
-
-        double out = dem;
-        double valley = Math.max(val1, val2);
-        double bed = chan1 >= chan2 ? trunkBed : tribBed;
-        out -= valley * Math.max(out - bed, 0.0) * 0.50; // the wide U: ground slopes towards the channel floor
-        out = out * (1.0 - chan2) + Math.min(out, tribBed) * chan2;
-        out = out * (1.0 - chan1) + Math.min(out, trunkBed) * chan1;
-        double river = Math.max(chan1, chan2);
-
-        double lakeStrength = 0.0;
-        if (!noLake) {
-            double ln = Noise.fbm(x, z, 3, 1300.0, seed + 6021);
-            double low2 = 1.0 - Mathx.smoothstep(110.0, 150.0, dem);
-            lakeStrength = Mathx.smoothstep(0.22, 0.34, ln) * low2;
-            out = out * (1.0 - lakeStrength) + Math.min(out, line - LAKE_DEPTH) * lakeStrength;
-        }
-        double waterLine = river + lakeStrength > 0.02 ? line : NO_WATER_LINE;
-        return new double[] {out, river, lakeStrength, waterLine};
-    }
-
-    /** Approximate distance (blocks) to the zero contour of an fBm: {@code |n| / |grad n|}. */
-    private static double zeroSetDistance(double wx, double wz, double scale, long seed) {
-        double n = Noise.fbm(wx, wz, 3, scale, seed);
-        double h = 6.0;
-        double gx = (Noise.fbm(wx + h, wz, 3, scale, seed) - Noise.fbm(wx - h, wz, 3, scale, seed)) / (2 * h);
-        double gz = (Noise.fbm(wx, wz + h, 3, scale, seed) - Noise.fbm(wx, wz - h, 3, scale, seed)) / (2 * h);
-        double mag = Math.max(Math.hypot(gx, gz), 1e-6);
-        return Math.abs(n) / mag;
-    }
 
     // ---------------------------------------------------------------------------------------
     // convenience
