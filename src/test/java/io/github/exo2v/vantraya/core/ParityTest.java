@@ -113,20 +113,40 @@ public class ParityTest {
         assertTrue("max |ridges diff| " + maxR, maxR < 0.03);
     }
 
+    /**
+     * The offline engine's output was clamped to exact elevations near every landmark centre (its pin and
+     * re-pin stages). The live model retired those clamps in 0.2.0 ("zones, not pins"), so columns within the
+     * old clamp radii have no counterpart to compare against and are set aside here; everywhere else the two
+     * engines must still agree to the tolerances below - that is the check on the maths itself.
+     */
+    private static boolean withinRetiredPin(double x, double z) {
+        for (Spec.Landmark lm : Spec.LANDMARKS) {
+            if (Math.hypot(x - lm.x(), z - lm.z()) < 300.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Test
     public void heightFieldMatchesTheOfflineDem() {
         double sum = 0;
         double max = 0;
         int over1 = 0;
+        int n = 0;
         for (Row r : ROWS) {
+            if (withinRetiredPin(r.x(), r.z())) {
+                continue;
+            }
             double d = Math.abs(model.sample(r.x(), r.z()).height() - r.dem());
             sum += d;
             max = Math.max(max, d);
             if (d > 1.0) {
                 over1++;
             }
+            n++;
         }
-        int n = ROWS.size();
+        assertTrue("only " + n + " parity columns outside the retired pin zones", n > 250);
         assertTrue("mean |dem diff| = " + sum / n, sum / n < 0.15);
         assertTrue("max |dem diff| = " + max, max < 5.0);
         assertTrue("share of columns off by more than one block: " + over1 + "/" + n, over1 < 0.06 * n);

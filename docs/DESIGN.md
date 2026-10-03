@@ -51,7 +51,7 @@ The mod is two layers:
 | §5.7 | nine landmark shapers, shelf dropoff, Veil | `Landforms`, `Instances`, `Spec.shelfDrop` | `ParityTest`, `ModelTest.veilOfSaltIsAbyssal`, `shelfDropsAwayBeyondTheContinent` |
 | §5.8–5.10 | erosion, hydrology, rivers | *replaced* (§5) | `ModelTest` water invariants |
 | §5.11 | dry landforms, no-water caldera | `VantrayaModel` masks, `CalderaFluids` | `ModelTest.calderaIsNeverWet…`, `closedBasinLandforms…` |
-| §5.12 | landmark re-pinning | pointwise pull + water keep-out | `ModelTest.everyLandmarkCentreLandsOnItsSpecifiedElevation` |
+| §5.12 | landmark re-pinning | retired in 0.2.0 (zones, not pins) | `ModelTest.everyLandmarkCentreLandsInItsElevationZone` |
 | §5.14 | per-block surface, biomes override | `BiomeLogic`, `SurfacePainter` | `BiomeLogicTest`, `SurfaceLogicTest` |
 | §9.4 | verify the finished world against the table | `SpecVerifier`, `/vantraya verify` | `InstancesAndVerifierTest` (and a flat world must fail) |
 
@@ -110,7 +110,7 @@ Sampling costs about 6 µs per column and is thread-safe (stateless noise, immut
 | NumPy-random placement of the Spine's 31 stations and the needles | `SplittableRandom` with the same distributions; **the canonical seed uses the offline engine's actual tables** | NumPy's PCG64 has no Java counterpart; the tables make the canonical world's mountains identical |
 | thermal erosion, stream-power incision, diffusion | not applied | the handoff itself says the landforms "are already the erosion product"; `detail_scale` keeps jagged ground jagged |
 | priority-flood, D8 flow, accumulation, graded profiles, meanders, deltas | river valleys + lake basins (below) | flow routing is global; worldgen must be local |
-| post-hydrology re-pinning | pointwise pull + water kept out of pin zones | same effect, no second pass |
+| post-hydrology re-pinning | retired in 0.2.0: zones, not pins | the play test asked for terrain that grows from the noise |
 | moisture advection (26 steps over the raster) | its closed form | the offline run barely moves moisture; measured mean error 0.005 |
 | the coast table's two ±180° entries (3350 vs 3150) | both ends become their mean | the wrapped curve otherwise jumped 200 blocks along the west axis |
 | (not enforced) | **600-block non-snowy boreal belt** around the Glacial Spine | spec §4 tier 1; the reference world touches temperate plains to the Spine's edge (76 % tier 2 within 100 blocks) |

@@ -33,15 +33,28 @@ public final class SpecVerifier {
         }
     }
 
-    /** Tolerance, in blocks, around an exact specified elevation (the ground is a whole block). */
-    public static final double CENTRE_TOLERANCE = 1.0;
-
     /**
      * HANDOFF 9.4: the offline verifier runs with {@code --pad 0.25}, "the fraction of each elevation band allowed as
      * tolerance". The Veil's band is the abyss floor to the trench top (-32..10), so a quarter of it is 10.5 blocks.
-     * (The landmark centres are held to a far tighter {@link #CENTRE_TOLERANCE}.)
+     *
+     * <p>Since 0.2.0 the continent is generated as <em>zones, not pins</em>: no column is clamped to an exact Y,
+     * so every landmark is held to its elevation band (plus this pad and a small floor) rather than to a point.
      */
     public static final double BAND_PAD = 0.25;
+
+    /** The elevation range a landmark's centre may sit in: its band with the pad, wider where the landform itself is deep. */
+    public static double[] zoneRange(Landmark lm) {
+        double pad = Math.max(6.0, BAND_PAD * (lm.yHi() - lm.yLo()));
+        if (lm.kind() == Kind.QUARRY) {
+            return new double[] {55.0, 115.0}; // the quarry's pit floor and chasms are part of the landform
+        }
+        return new double[] {lm.yLo() - pad, lm.yHi() + pad};
+    }
+
+    public static boolean inZone(Landmark lm, int ground) {
+        double[] r = zoneRange(lm);
+        return ground >= r[0] && ground <= r[1];
+    }
 
     public static List<Check> run(Probe p) {
         List<Check> out = new ArrayList<>();
@@ -50,8 +63,8 @@ public final class SpecVerifier {
             int gz = (int) Math.floor(lm.z());
             int ground = p.groundHeight(gx, gz);
             if (lm.kind() == Kind.CALDERA) {
-                out.add(check(lm.name(), "Obsidian Throne at the centre", Math.abs(ground - Spec.CALDERA_THRONE) <= CENTRE_TOLERANCE,
-                        "ground Y=%d, specified %.0f", ground, Spec.CALDERA_THRONE));
+                out.add(check(lm.name(), "Obsidian Throne at the centre", Math.abs(ground - Spec.CALDERA_THRONE) <= 8.0,
+                        "ground Y=%d, specified %.0f (+/-8: zones, not pins)", ground, Spec.CALDERA_THRONE));
                 int floor = p.groundHeight(gx + 200, gz);
                 out.add(check(lm.name(), "sunken crater floor (38-42)", floor >= 37 && floor <= 43,
                         "ground Y=%d at r=200", floor));
@@ -65,8 +78,9 @@ public final class SpecVerifier {
                 out.add(check(lm.name(), "volcanic rim wall (142-156)", rim >= 135 && rim <= 165,
                         "highest ring block Y=%d", rim));
             } else {
-                out.add(check(lm.name(), "centre elevation", Math.abs(ground - lm.y()) <= CENTRE_TOLERANCE,
-                        "ground Y=%d, specified %.0f", ground, lm.y()));
+                double[] zr = zoneRange(lm);
+                out.add(check(lm.name(), "centre elevation within its band", inZone(lm, ground),
+                        "ground Y=%d, zone %.0f..%.0f (band %.0f-%.0f)", ground, zr[0], zr[1], lm.yLo(), lm.yHi()));
             }
             BiomeRole role = p.role(gx, Math.max(ground + 1, (int) Spec.SEA_LEVEL + 1), gz);
             if (role != null) {

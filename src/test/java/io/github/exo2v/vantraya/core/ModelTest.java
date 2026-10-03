@@ -35,13 +35,16 @@ public class ModelTest {
     }
 
     @Test
-    public void everyLandmarkCentreLandsOnItsSpecifiedElevation() {
+    public void everyLandmarkCentreLandsInItsElevationZone() {
+        // zones, not pins (0.2.0): no column is clamped to an exact Y any more - each centre must still land
+        // inside the landmark's specified elevation band (with the verifier's pad)
         for (long seed : SEEDS) {
             VantrayaModel m = VantrayaModel.forSeed(seed);
             for (Landmark lm : Spec.LANDMARKS) {
-                double h = m.height(lm.x(), lm.z());
-                double want = lm.kind() == Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y(); // the centre is the Obsidian Throne
-                assertEquals(lm.key() + " seed " + seed, want, h, 0.5);
+                int h = (int) Math.rint(m.height(lm.x(), lm.z()));
+                assertTrue(lm.key() + " seed " + seed + ": ground " + h + " is outside "
+                                + java.util.Arrays.toString(SpecVerifier.zoneRange(lm)),
+                        SpecVerifier.inZone(lm, h));
             }
         }
     }

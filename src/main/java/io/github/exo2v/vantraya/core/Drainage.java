@@ -225,7 +225,9 @@ public final class Drainage {
             channel[idx] = !lake[idx] && !noWater[idx] && natural[idx] > Spec.SEA_LEVEL - 1.0f
                     && natural[idx] < CHANNEL_MAX_H && accum[idx] >= HEAD_CATCHMENT;
             if (channel[idx]) {
-                halfWidth[idx] = (float) Mathx.clamp(2.5 + 1.35 * Math.log(accum[idx] / (double) HEAD_CATCHMENT), 2.5, 12.0);
+                // never narrower than seven blocks: the engine samples the height field on a 4-block
+                // grid and a slimmer notch comes out of that smoothing as a dry seam
+                halfWidth[idx] = (float) Mathx.clamp(3.5 + 1.35 * Math.log(accum[idx] / (double) HEAD_CATCHMENT), 3.5, 12.0);
             }
             if (lake[idx]) {
                 lakeK[idx] = (float) Mathx.smoothstep(0.15, 1.2, filled[idx] - natural[idx]);

@@ -29,7 +29,8 @@ import io.github.exo2v.vantraya.core.Spec.Window;
  *       river-valley stand-in that
  *       honours the same rules (valleys where {@code R ~ 0}, no standing water on dry landforms,
  *       absolutely no water in the caldera);</li>
- *   <li>post-hydrology landmark re-pinning -> the same radius-220 pull, applied pointwise;</li>
+ *   <li>post-hydrology landmark re-pinning -> retired: the continent is generated as zones, not pins
+ *       (0.2.0), so no column is clamped to an exact elevation any more;</li>
  *   <li>moisture advection -> a closed-form moisture budget.</li>
  * </ul>
  *
@@ -435,16 +436,10 @@ public final class VantrayaModel {
                 double strong = Mathx.saturate(wgt * (soft ? 1.25 : (hard ? 2.0 : 0.9)));
                 dem = dem * (1.0 - strong) + target * strong;
             }
-            if (lm.kind() != Kind.CALDERA) {
-                double pinR = (lm.kind() == Kind.DUNES || lm.kind() == Kind.CORDILLERA) ? 260.0 : 150.0;
-                double d = Math.hypot(x - lm.x(), z - lm.z());
-                double pin = Math.pow(Mathx.saturate(1.0 - d / pinR), 2.0);
-                if (pin > 0.0) {
-                    dem = dem * (1.0 - pin) + lm.y() * pin;
-                    pinMask = Math.max(pinMask, pin);
-                }
-            }
         }
+        // Zones, not pins: the landmarks keep their place, character and elevation band, but no column is
+        // clamped to an exact Y any more. The play test asked for terrain that grows out of the noise
+        // ("more naturally generated"), and every per-column clamp was fighting the noise.
         dem = Mathx.clamp(dem, Spec.ABYSS_FLOOR, Spec.SPINE_HIGH + 4.0);
 
         // ---- 6. dry masks (HANDOFF 5.11) ----------------------------------------------------
@@ -478,50 +473,32 @@ public final class VantrayaModel {
         double waterLine = NO_WATER_LINE;
         if (cfg.carveWater() && !noWater && r < Spec.SHELF_INNER) {
             Drainage.At wa = drainage().at(x, z);
-            // The specification gives every landmark centre an exact elevation, so water stays out of the pin
-            // zone around it (the offline engine re-pins after hydrology; here the water simply never gets there).
-            double keep = 1.0 - Mathx.smoothstep(0.0, 0.35, pinMask);
-            if (wa.wet() && keep > 0.0 && wa.waterY() > NO_WATER_LINE + 1.0) {
+            if (wa.wet() && wa.waterY() > NO_WATER_LINE + 1.0) {
                 waterLine = wa.waterY();
-                lake = noLake ? 0.0 : wa.lake() * keep;
-                if (river == 0.0 && lake == 0.0 && wa.lake() > wa.channel()) {
-                    waterLine = NO_WATER_LINE; // a dry landform keeps no pond, not even a bleeding edge
-                }
                 if (wa.lake() > wa.channel()) {
                     // a real basin from the priority flood: the ground is already below the spill level,
                     // so the lake needs no cut of its own - the fill pass puts the water in
-                    river = 0.0;
-                } else {
-                    double t = wa.dist() / Math.max(wa.halfWidth(), 1.0);
-                    double depth = 1.6 + 0.62 * wa.halfWidth();
-                    double u = 1.0 - t * t;
-                    double profile = u > 0.0 ? u * u : 0.0; // (1 - t^2)^2: a smooth U, flat at the edge
-                    double bed = wa.waterY() - 0.5 - depth * profile;
-                    if (t >= 1.0) {
-                        // outside the channel the ground rises away from it: the bank, not a wall
-                        bed = wa.waterY() + (wa.dist() - wa.halfWidth()) * 0.4;
+                    lake = noLake ? 0.0 : wa.lake();
+                    if (lake == 0.0) {
+                        waterLine = NO_WATER_LINE; // a dry landform keeps no pond, not even a bleeding edge
                     }
-                    dem = dem + (Math.min(dem, bed) - dem) * wa.channel() * keep;
-                    river = wa.channel() * (1.0 - Mathx.smoothstep(0.85, 1.15, t)) * keep;
+                } else {
+                    double hw = Math.max(wa.halfWidth(), 1.0);
+                    double t = wa.dist() / hw;
+                    double depth = 1.6 + 0.62 * hw;
+                    double u = Math.max(0.0, 1.0 - t * t);
+                    double bed = wa.waterY() - 0.5 - depth * u * u; // a smooth U inside the channel
+                    // The bank is a shoulder that meets the natural ground, never a wall: the cut fades
+                    // out over the last stretch of the cross-section so the channel has no rim (0.1.3's
+                    // profile ended in a step and the play test called it cookie-cutter).
+                    double cut = (1.0 - Mathx.smoothstep(1.0, 1.9, t)) * wa.channel();
+                    dem = dem + (Math.min(dem, bed) - dem) * cut;
+                    river = wa.channel() * (1.0 - Mathx.smoothstep(0.9, 1.7, t));
                 }
             }
         }
 
-        // ---- 8. landmark re-pinning (HANDOFF 5.12) ------------------------------------------
-        if (cfg.repin() && dem >= Spec.SEA_LEVEL) {
-            for (Landmark lm : lms) {
-                if (lm.kind() == Kind.CALDERA) {
-                    continue;
-                }
-                double d = Math.hypot(x - lm.x(), z - lm.z());
-                double wRepin = Math.pow(Mathx.saturate(1.0 - d / 220.0), 2.0);
-                if (wRepin > 0.0) {
-                    dem += Mathx.clamp(lm.y() - dem, -6.0, 6.0) * wRepin;
-                }
-            }
-        }
-
-        // ---- 9. altitude lapse on the finished surface (ClimateModel.finalize) --------------
+        // ---- 8. altitude lapse on the finished surface (ClimateModel.finalize) ----------------
         double above = Math.max(dem - Spec.SEA_LEVEL, 0.0);
         double tFinalUnit = Mathx.saturate(tAshUnit - Math.min(above * 0.00275, 0.60));
         if (cfg.borealBuffer()) {
@@ -531,7 +508,7 @@ public final class VantrayaModel {
         double hFinalUnit = Mathx.saturate(0.45 * hAshUnit
                 + 0.55 * (adv(c) * 0.85 + humidityPatch(x, z) * 0.15) - c * 0.10);
 
-        // ---- 10. how much 3D noise the density function may add -----------------------------
+        // ---- 9. how much 3D noise the density function may add ------------------------------
         double rugged = Mathx.saturate((0.30 - ero) / 0.9);
         if (owner == cordilleraIdx || owner == spiresIdx) {
             rugged = Math.max(rugged, 0.9);

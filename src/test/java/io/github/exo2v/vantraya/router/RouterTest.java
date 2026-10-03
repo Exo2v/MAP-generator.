@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import io.github.exo2v.vantraya.core.SpecVerifier;
+
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Files;
@@ -113,23 +115,25 @@ public class RouterTest {
     }
 
     @Test
-    public void everyLandmarkCentreIsExactlyItsSpecifiedElevation() {
+    public void everyLandmarkCentreSitsInItsElevationZone() {
+        // zones, not pins (0.2.0): the router must land every centre inside its landmark's elevation band
         for (long seed : new long[] {Spec.SPEC_SEED, 99L, 31337L}) {
             VantrayaModel m = VantrayaModel.forSeed(seed);
             DensityInterpreter in = new DensityInterpreter(m);
             JsonElement fd = router.get("final_density");
             for (Spec.Landmark lm : Spec.LANDMARKS) {
-                double want = lm.kind() == Spec.Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y();
                 int got = topSolid(in, fd, lm.x(), lm.z());
-                assertEquals(lm.key() + " seed " + seed, want, got, 0.0);
+                assertTrue(lm.key() + " seed " + seed + ": " + got + " is outside "
+                                + java.util.Arrays.toString(SpecVerifier.zoneRange(lm)),
+                        SpecVerifier.inZone(lm, got));
             }
         }
     }
 
     /**
      * Vanilla's cave entrances and noodle tunnels carve from the surface down; one entrance opened a 17-block pit in the
-     * pinned top of the Hermit's Spire (found by the in-engine run). With either forced to its strongest, a landmark
-     * centre must still stand at its specified elevation - and, as a control for each, ground away from every centre
+     * top of the Hermit's Spire (found by the in-engine run). With either forced to its strongest, a landmark
+     * centre must still stand in its elevation zone - and, as a control for each, ground away from every centre
      * must be carved, or the test proves nothing.
      */
     @Test
@@ -140,8 +144,9 @@ public class RouterTest {
             DensityInterpreter in = new DensityInterpreter(m);
             in.override(function, -100.0);
             for (Spec.Landmark lm : Spec.LANDMARKS) {
-                double want = lm.kind() == Spec.Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y();
-                assertEquals(function + ": " + lm.key() + " centre", want, topSolid(in, fd, lm.x(), lm.z()), 0.0);
+                int top = topSolid(in, fd, lm.x(), lm.z());
+                assertTrue(function + ": " + lm.key() + " centre " + top + " left its zone",
+                        SpecVerifier.inZone(lm, top));
                 for (double[] d : new double[][] {{40, 0}, {0, -40}, {-30, 30}}) {
                     double x = lm.x() + d[0];
                     double z = lm.z() + d[1];

@@ -684,13 +684,13 @@ class InEngineWorldgenTest {
             ProtoChunk chunk = fill(gen, rs, biomes, x >> 4, z >> 4);
             int centre = ground(chunk, x, z);
             int viaBase = gen.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, LEVEL, rs) - 1;
-            int ground = groundNear(chunk, x, z); // the terrain, seen through a cave mouth opening on the pin
-            double want = lm.kind() == Spec.Kind.CALDERA ? Spec.CALDERA_THRONE : lm.y();
+            int ground = groundNear(chunk, x, z); // the terrain, seen through a cave mouth opening on the zone
             if (centre != viaBase) {
                 problems.add(lm.name() + ": the chunk's centre column ends at " + centre + " but getBaseHeight says " + viaBase);
             }
-            if (Math.abs(ground - want) > SpecVerifier.CENTRE_TOLERANCE) {
-                problems.add(lm.name() + ": ground Y " + ground + " (centre column " + centre + "), specified " + want);
+            if (!SpecVerifier.inZone(lm, ground)) {
+                problems.add(lm.name() + ": ground Y " + ground + " (centre column " + centre + "), zone "
+                        + java.util.Arrays.toString(SpecVerifier.zoneRange(lm)));
             }
             if (chunk.getBlockState(new BlockPos(x, MIN_Y, z)).isAir()) {
                 problems.add(lm.name() + ": no rock at the bottom of the world");
