@@ -10,8 +10,6 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 
-import io.github.exo2v.vantraya.core.BiomeLogic;
-import io.github.exo2v.vantraya.core.BiomeRole;
 import io.github.exo2v.vantraya.core.Spec;
 import io.github.exo2v.vantraya.core.SpecVerifier;
 import io.github.exo2v.vantraya.core.VantrayaModel;
@@ -40,7 +38,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   /vantraya locate &lt;landmark&gt;    centre coordinates and elevation of a landmark
  *   /vantraya tp &lt;landmark&gt;        teleport to a landmark (operators)
  *   /vantraya verify               HANDOFF 9.4 for the running world: reads the real generator, not the model (operators)
- *   /vantraya biomes &lt;namespace&gt;   list a mod's biomes - the IDs to add to a biome role tag (operators)
+ *   /vantraya biomes &lt;namespace&gt;   list a mod's biomes - which ids the biome source can answer (operators)
  * </pre>
  */
 public final class VantrayaCommand {
@@ -125,10 +123,11 @@ public final class VantrayaCommand {
                 ? Spec.LANDMARKS.get(f.landmark()).name()
                 : (f.landmark() == Spec.VEIL_ID ? Spec.VEIL.name() : "open land between the landmarks");
         say(src, String.format(Locale.ROOT, "%s  (x %d, z %d)", place, pos.getX(), pos.getZ()), ChatFormatting.GOLD);
-        say(src, String.format(Locale.ROOT, "  surface Y %.1f   climate tier %d   temperature %.2f   humidity %.2f",
-                f.height(), f.tier(), f.temperature(), f.humidity()));
-        say(src, String.format(Locale.ROOT, "  continentalness %.2f   erosion %.2f   ridges %.2f",
-                f.cont(), f.erosion(), f.ridges()));
+        int ground = gen.terrainTopY(pos.getX(), pos.getZ(), src.getLevel(), src.getLevel().getChunkSource().randomState());
+        say(src, String.format(Locale.ROOT, "  surface Y %d   climate tier %d   temperature %.2f   humidity %.2f",
+                ground, f.tier(), f.temperature(), f.humidity()));
+        say(src, String.format(Locale.ROOT, "  continentalness %.2f   erosion %.2f   ridges %.2f%s",
+                f.cont(), f.erosion(), f.ridges(), f.valley() ? "  [river valley]" : ""));
         return 1;
     }
 
@@ -155,10 +154,9 @@ public final class VantrayaCommand {
             return 0;
         }
         ServerLevel level = src.getLevel();
-        VantrayaModel model = gen.model(level.getChunkSource().randomState());
         int x = (int) lm.x();
         int z = (int) lm.z();
-        int y = (int) Math.ceil(Math.max(model.height(x + 0.5, z + 0.5), Spec.SEA_LEVEL)) + 3;
+        int y = Math.max(gen.terrainTopY(x, z, level, level.getChunkSource().randomState()), (int) Spec.SEA_LEVEL) + 3;
         ServerPlayer player = src.getPlayerOrException();
         player.teleportTo(level, x + 0.5, y, z + 0.5, player.getYRot(), player.getXRot());
         say(src, "Teleported to the " + lm.name());
@@ -180,12 +178,9 @@ public final class VantrayaCommand {
             }
 
             @Override
-            public BiomeRole role(int x, int y, int z) {
-                Climate.TargetPoint tp = rs.sampler().sample(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z));
-                return BiomeLogic.classify(x, y, z,
-                        Climate.unquantizeCoord(tp.temperature()), Climate.unquantizeCoord(tp.humidity()),
-                        Climate.unquantizeCoord(tp.continentalness()), Climate.unquantizeCoord(tp.erosion()),
-                        Climate.unquantizeCoord(tp.depth()));
+            public String biomeId(int x, int y, int z) {
+                return level.getBiome(new BlockPos(x, y, z)).unwrapKey()
+                        .map(k -> k.location().toString()).orElse(null);
             }
         };
         List<SpecVerifier.Check> checks = SpecVerifier.run(probe);
@@ -213,7 +208,7 @@ public final class VantrayaCommand {
             src.sendFailure(Component.literal("No biomes in namespace '" + namespace + "'."));
             return 0;
         }
-        say(src, ids.size() + " biomes in '" + namespace + "' - add the ones you want to a role tag, e.g. "
+        say(src, ids.size() + " biomes in '" + namespace + "' (TerraBlender regions and biome mods place these by their own climate parameters), e.g. "
                 + "data/vantraya_builder/tags/worldgen/biome/biome/temperate_forest.json:", ChatFormatting.GOLD);
         for (String id : ids) {
             say(src, "  " + id);

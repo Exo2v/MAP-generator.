@@ -1,17 +1,11 @@
 {
   "type": "minecraft:add",
   "argument1": {
-    "type": "minecraft:mul",
-    "argument1": 0.0078125,
-    "argument2": "vantraya_builder:field/height"
+    "type": "minecraft:y_clamped_gradient",
+    "from_value": 1.5,
+    "from_y": -64,
+    "to_value": -1.5,
+    "to_y": 320
   },
-  "argument2": {
-    "type": "minecraft:add",
-    "argument1": 0.00390625,
-    "argument2": {
-      "type": "minecraft:mul",
-      "argument1": -0.0078125,
-      "argument2": "minecraft:y"
-    }
-  }
+  "argument2": "vantraya_builder:offset"
 }

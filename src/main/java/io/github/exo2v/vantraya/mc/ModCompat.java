@@ -7,8 +7,6 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import io.github.exo2v.vantraya.VantrayaBuilder;
-import io.github.exo2v.vantraya.core.BiomeRole;
-import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -23,11 +21,11 @@ import net.neoforged.neoforge.event.server.ServerStartingEvent;
  *
  * <p>How Vantraya works alongside Lithosphere, Tectonic, Still Life and friends: see
  * {@code docs/COMPATIBILITY.md}. In short, the Vantraya world type owns its own dimension type, noise
- * settings and generator (so a replacement of {@code minecraft:overworld}'s <em>noise settings</em> cannot
- * reach it), uses vanilla-namespace biomes that any biome-feature mod already decorates, and exposes one
- * biome tag per role for other mods' biomes to join. A pack's own {@code minecraft:overworld}
- * <em>dimension</em> is a different matter - vanilla lets it beat the world type - and is handled by
- * {@link WorldTypePriority} (COMPATIBILITY.md section 0).
+ * settings and generator, and runs vanilla's multi-noise biome builder on the specification's parameter
+ * maps - so TerraBlender regions, biome-feature mods and structure mods all apply as they would to any
+ * vanilla-shaped world. A pack's own {@code minecraft:overworld} <em>dimension</em> is a different matter
+ * - vanilla lets it beat the world type - and is handled by {@link WorldTypePriority}
+ * (COMPATIBILITY.md section 0).
  */
 public final class ModCompat {
     private ModCompat() {
@@ -37,8 +35,9 @@ public final class ModCompat {
             {"lithostitched", "Lithostitched (worldgen library; its overworld modifiers apply to Vantraya's overworld)"},
             {"tectonic", "Tectonic (replaces minecraft:overworld terrain; Vantraya has its own noise settings)"},
             {"lithosphere", "Lithosphere (replaces minecraft:overworld terrain; Vantraya has its own noise settings)"},
-            {"still_life", "Still Life (its biomes can join Vantraya's biome role tags)"},
-            {"stilllife", "Still Life (its biomes can join Vantraya's biome role tags)"},
+            {"terrablender", "TerraBlender (its regions apply: Vantraya uses the vanilla multi-noise overworld builder)"},
+            {"still_life", "Still Life (biome mod; TerraBlender regions of biome mods apply to Vantraya)"},
+            {"stilllife", "Still Life (biome mod; TerraBlender regions of biome mods apply to Vantraya)"},
     };
 
     public static void onServerStarting(ServerStartingEvent event) {
@@ -76,17 +75,6 @@ public final class ModCompat {
                 namespaces.merge(id.getNamespace(), 1, Integer::sum);
             }
             VantrayaBuilder.LOGGER.info("Vantraya: biome namespaces available: {}", namespaces);
-            for (BiomeRole role : BiomeRole.values()) {
-                registry.getTag(VantrayaBiomeSource.tagOf(role)).ifPresent(tag -> {
-                    List<String> members = new ArrayList<>();
-                    for (Holder<Biome> h : tag) {
-                        h.unwrapKey().ifPresent(key -> members.add(key.location().toString()));
-                    }
-                    if (members.size() > 1) {
-                        VantrayaBuilder.LOGGER.info("Vantraya: role '{}' spreads {} biomes: {}", role.id(), members.size(), members);
-                    }
-                });
-            }
         } catch (RuntimeException e) {
             VantrayaBuilder.LOGGER.debug("Vantraya: could not read the biome registry for the compatibility report", e);
         }

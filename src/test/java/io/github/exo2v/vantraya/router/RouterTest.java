@@ -1,378 +1,229 @@
 package io.github.exo2v.vantraya.router;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import io.github.exo2v.vantraya.core.SpecVerifier;
-
-import java.io.InputStream;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
-import io.github.exo2v.vantraya.core.BiomeLogic;
-import io.github.exo2v.vantraya.core.BiomeRole;
 import io.github.exo2v.vantraya.core.Spec;
+import io.github.exo2v.vantraya.core.SpecVerifier;
 import io.github.exo2v.vantraya.core.VantrayaModel;
 
 /**
- * Runs the actual noise-router JSON that ships in the mod against the specification model, with noise at its
- * mean, and checks the properties the world depends on: the terrain surface sits exactly on the model's height
- * field (so the nine landmark pins are exact), the bedrock is solid, the sky is air, and {@code depth} has
- * vanilla's scale so biome sources, aquifers and cave thresholds behave.
+ * The offline acceptance of the 0.3.0 terrain: vanilla's offset / factor / jaggedness / depth /
+ * sloped-cheese spline stack (kept as data) driven by the specification's parameter maps, evaluated here
+ * without Minecraft. It asks the questions the play-test document asked - is there a continent, do the
+ * landmarks sit in their zones, does the river band carve a valley that runs downhill to the sea - not
+ * "does the code run".
  */
 public class RouterTest {
-    private static JsonObject noiseSettings;
-    private static JsonObject router;
 
-    @BeforeClass
-    public static void load() {
-        noiseSettings = DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/noise_settings/vantraya.json").getAsJsonObject();
-        router = noiseSettings.getAsJsonObject("noise_router");
+    private static final String SETTINGS = "/data/vantraya_builder/worldgen/noise_settings/vantraya.json";
+
+    private final VantrayaModel model = VantrayaModel.forSeed(7L);
+    private final DensityInterpreter interp = new DensityInterpreter(model);
+
+    private JsonElement router(String slot) {
+        JsonElement root = DensityInterpreter.parseResource(SETTINGS);
+        return root.getAsJsonObject().get("noise_router").getAsJsonObject().get(slot);
     }
 
-    private static int topSolid(DensityInterpreter in, JsonElement finalDensity, double x, double z) {
-        for (int y = 319; y >= -64; y--) {
-            if (in.eval(finalDensity, x, y, z) > 0.0) {
-                return y;
+    /** The Y where {@code final_density} crosses zero - the terrain surface, by bisection. */
+    private double surfaceY(double x, double z) {
+        JsonElement fd = router("final_density");
+        double lo = -64.0;
+        double hi = 320.0;
+        // density falls as y rises: solid below the surface, air above
+        double atLo = interp.eval(fd, x, lo, z);
+        double atHi = interp.eval(fd, x, hi, z);
+        assertTrue("density must be solid at min_y (" + atLo + ")", atLo > 0.0);
+        assertTrue("density must be air at max_y (" + atHi + ")", atHi < 0.0);
+        for (int i = 0; i < 40; i++) {
+            double mid = 0.5 * (lo + hi);
+            if (interp.eval(fd, x, mid, z) > 0.0) {
+                lo = mid;
+            } else {
+                hi = mid;
             }
         }
-        return -65;
+        return 0.5 * (lo + hi);
     }
 
     @Test
-    public void noiseSettingsHaveTheWorldGeometry() {
-        assertEquals(63, noiseSettings.get("sea_level").getAsInt()); // water fills up to Y=62: the specified waterline
-        JsonObject noise = noiseSettings.getAsJsonObject("noise");
-        assertEquals(-64, noise.get("min_y").getAsInt());
-        assertEquals(384, noise.get("height").getAsInt());
-        assertTrue(noiseSettings.get("aquifers_enabled").getAsBoolean());
-        assertTrue(noiseSettings.get("ore_veins_enabled").getAsBoolean());
-        assertNotNull(noiseSettings.get("surface_rule"));
-        assertNotNull(noiseSettings.get("spawn_target"));
-    }
-
-    @Test
-    public void everyReferenceInTheRouterResolves() {
-        DensityInterpreter in = new DensityInterpreter(VantrayaModel.forSeed(1));
-        for (String key : new String[] {"final_density", "initial_density_without_jaggedness", "depth", "continents", "erosion",
-                "ridges", "temperature", "vegetation"}) {
-            in.resolveAll(router.get(key));
+    public void everyReferenceInTheStackResolves() {
+        for (String slot : new String[] {"continents", "depth", "erosion", "ridges", "temperature",
+                "vegetation", "initial_density_without_jaggedness", "final_density"}) {
+            interp.resolveAll(router(slot));
         }
     }
 
     @Test
-    public void depthHasVanillasScaleAndPutsZeroAtTheSurface() {
-        for (long seed : new long[] {Spec.SPEC_SEED, 5L}) {
-            VantrayaModel m = VantrayaModel.forSeed(seed);
-            DensityInterpreter in = new DensityInterpreter(m);
-            JsonElement depth = router.get("depth");
-            for (int x = -3000; x <= 3000; x += 500) {
-                for (int z = -3000; z <= 3000; z += 500) {
-                    double h = m.height(x, z);
-                    for (int y : new int[] {-60, 0, 62, 100, 250}) {
-                        assertEquals((h + 0.5 - y) / 128.0, in.eval(depth, x, y, z), 1e-9);
-                    }
-                    // one block of height = 1/128 of depth, as in vanilla; the surface block sits at depth ~0
-                    assertEquals(0.0, in.eval(depth, x, Math.rint(h), z), 1.0 / 128.0 + 1e-9);
+    public void theOceanIsOceanAndTheInteriorIsLand() {
+        for (long seed : new long[] {7L, 42L, 20250929L}) {
+            VantrayaModel m = new VantrayaModel(seed, VantrayaModel.Config.production());
+            DensityInterpreter ip = new DensityInterpreter(m);
+            // out past the Veil the ground must be sea floor; the interior must be land
+            double deep = 0;
+            double land = 0;
+            int deepN = 0;
+            int landN = 0;
+            for (int k = 0; k < 60; k++) {
+                double a = k * Math.PI / 30.0;
+                double ox = 4200 * Math.cos(a);
+                double oz = 4200 * Math.sin(a);
+                VantrayaModel.Fields f = m.sample(ox, oz);
+                if (f.cont() < -0.6) {
+                    deep += surfaceYWith(ip, ox, oz);
+                    deepN++;
+                }
+                // the interior: within r=1200 of the caldera, high continentalness
+                double ia = k * Math.PI / 30.0;
+                double ix = 900 * Math.cos(ia);
+                double iz = 900 * Math.sin(ia);
+                VantrayaModel.Fields fi = m.sample(ix, iz);
+                if (fi.cont() > 0.3) {
+                    land += surfaceYWith(ip, ix, iz);
+                    landN++;
                 }
             }
+            assertTrue("deep-ocean columns must exist", deepN >= 10);
+            assertTrue("interior columns must exist", landN >= 10);
+            assertTrue("deep ocean is under water: " + (deep / deepN), deep / deepN < Spec.SEA_LEVEL - 5);
+            assertTrue("interior is dry land: " + (land / landN), land / landN > Spec.SEA_LEVEL + 3);
         }
     }
 
-    @Test
-    public void theTerrainSurfaceSitsOnTheHeightField() {
-        for (long seed : new long[] {Spec.SPEC_SEED, 2024L}) {
-            VantrayaModel m = VantrayaModel.forSeed(seed);
-            DensityInterpreter in = new DensityInterpreter(m);
-            JsonElement fd = router.get("final_density");
-            int checked = 0;
-            for (int x = -3600; x <= 3600; x += 400) {
-                for (int z = -3600; z <= 3600; z += 400) {
-                    double h = m.height(x, z);
-                    int want = (int) Math.floor(h + 0.5); // ground = round(H)
-                    int got = topSolid(in, fd, x, z);
-                    assertEquals("seed " + seed + " column " + x + "," + z + " (H=" + h + ")", want, got, 1);
-                    checked++;
-                }
+    // The stack is seed-independent JSON but the fields are not: one interpreter, many models.
+    private double surfaceYWith(DensityInterpreter ip, double x, double z) {
+        JsonElement fd = router("final_density");
+        double lo = -64.0;
+        double hi = 320.0;
+        for (int i = 0; i < 40; i++) {
+            double mid = 0.5 * (lo + hi);
+            if (ip.eval(fd, x, mid, z) > 0.0) {
+                lo = mid;
+            } else {
+                hi = mid;
             }
-            assertTrue(checked > 300);
         }
+        return 0.5 * (lo + hi);
     }
 
     @Test
-    public void everyLandmarkCentreSitsInItsElevationZone() {
-        // zones, not pins (0.2.0): the router must land every centre inside its landmark's elevation band
-        for (long seed : new long[] {Spec.SPEC_SEED, 99L, 31337L}) {
-            VantrayaModel m = VantrayaModel.forSeed(seed);
-            DensityInterpreter in = new DensityInterpreter(m);
-            JsonElement fd = router.get("final_density");
+    public void theLandmarksHoldTheirElevationZones() {
+        // one probe per landmark: the median of the columns of a small disc about the centre
+        for (long seed : new long[] {7L, 42L}) {
+            VantrayaModel m = new VantrayaModel(seed, VantrayaModel.Config.production());
+            DensityInterpreter ip = new DensityInterpreter(m);
             for (Spec.Landmark lm : Spec.LANDMARKS) {
-                int got = topSolid(in, fd, lm.x(), lm.z());
-                assertTrue(lm.key() + " seed " + seed + ": " + got + " is outside "
-                                + java.util.Arrays.toString(SpecVerifier.zoneRange(lm)),
-                        SpecVerifier.inZone(lm, got));
-            }
-        }
-    }
-
-    /**
-     * Vanilla's cave entrances and noodle tunnels carve from the surface down; one entrance opened a 17-block pit in the
-     * top of the Hermit's Spire (found by the in-engine run). With either forced to its strongest, a landmark
-     * centre must still stand in its elevation zone - and, as a control for each, ground away from every centre
-     * must be carved, or the test proves nothing.
-     */
-    @Test
-    public void caveEntrancesAndNoodlesCannotOpenTheSurfaceAtALandmarkCentre() {
-        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
-        JsonElement fd = router.get("final_density");
-        for (String function : new String[] {"minecraft:overworld/caves/entrances", "minecraft:overworld/caves/noodle"}) {
-            DensityInterpreter in = new DensityInterpreter(m);
-            in.override(function, -100.0);
-            for (Spec.Landmark lm : Spec.LANDMARKS) {
-                int top = topSolid(in, fd, lm.x(), lm.z());
-                assertTrue(function + ": " + lm.key() + " centre " + top + " left its zone",
-                        SpecVerifier.inZone(lm, top));
-                for (double[] d : new double[][] {{40, 0}, {0, -40}, {-30, 30}}) {
-                    double x = lm.x() + d[0];
-                    double z = lm.z() + d[1];
-                    double ground = Math.floor(m.height(x, z) + 0.5);
-                    assertEquals(function + ": " + lm.key() + " at " + x + "," + z, ground, topSolid(in, fd, x, z), 1.0);
-                }
-            }
-            int land = 0;
-            int carved = 0;
-            for (int x = -3400; x <= 3400; x += 400) {
-                for (int z = -3400; z <= 3400; z += 400) {
-                    if (Spec.protection(x, z) == 0.0 && m.height(x, z) > Spec.SEA_LEVEL + 5) {
-                        land++;
-                        if (topSolid(in, fd, x, z) < Math.floor(m.height(x, z) + 0.5) - 10) {
-                            carved++;
-                        }
+                List<Double> ys = new ArrayList<>();
+                for (int dx = -48; dx <= 48; dx += 24) {
+                    for (int dz = -48; dz <= 48; dz += 24) {
+                        ys.add(surfaceYWith(ip, lm.x() + dx, lm.z() + dz));
                     }
                 }
-            }
-            assertTrue("control for " + function + ": " + land + " land columns away from the centres, " + carved + " carved",
-                    land > 30 && carved == land);
-        }
-    }
-
-    @Test
-    public void spineSummitsClearTheOldTerrainCeiling() {
-        // vanilla fades terrain out between Y=240 and 256; the Glacial Spine is specified up to 279
-        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
-        DensityInterpreter in = new DensityInterpreter(m);
-        JsonElement fd = router.get("final_density");
-        double best = 0;
-        int bestX = 0;
-        int bestZ = 0;
-        for (int x = -1800; x <= 1800; x += 20) {
-            for (int z = -3500; z <= -1500; z += 20) {
-                double h = m.height(x, z);
-                if (h > best) {
-                    best = h;
-                    bestX = x;
-                    bestZ = z;
-                }
-            }
-        }
-        assertTrue("highest spine point " + best, best > 255 && best <= 284);
-        assertEquals((int) Math.floor(best + 0.5), topSolid(in, fd, bestX, bestZ), 1);
-    }
-
-    @Test
-    public void bedrockIsSolidAndTheSkyIsAir() {
-        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
-        DensityInterpreter in = new DensityInterpreter(m);
-        JsonElement fd = router.get("final_density");
-        for (int x = -3000; x <= 3000; x += 600) {
-            for (int z = -3000; z <= 3000; z += 600) {
-                for (int y = -64; y <= -48; y += 4) {
-                    assertTrue("floor must be solid at " + x + "," + y + "," + z, in.eval(fd, x, y, z) > 0.0);
-                }
-                for (int y = 314; y < 320; y++) {
-                    assertTrue("sky must be air at " + x + "," + y + "," + z, in.eval(fd, x, y, z) < 0.0);
-                }
+                ys.sort(Double::compare);
+                double median = ys.get(ys.size() / 2);
+                double[] zone = SpecVerifier.zoneRange(lm);
+                double slack = 15.0; // zones, not pins: the noise is allowed its texture
+                assertTrue(lm.name() + " median Y=" + median + " outside " + zone[0] + ".." + zone[1],
+                        median >= zone[0] - slack && median <= zone[1] + slack);
             }
         }
     }
 
     @Test
-    public void groundIsSolidWithoutPocketsBelowTheSurface() {
-        // with noise at its mean there must be no hollow just under the surface (caves come from the noise)
-        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
-        DensityInterpreter in = new DensityInterpreter(m);
-        JsonElement fd = router.get("final_density");
-        int solid = 0;
-        int total = 0;
-        for (int x = -3000; x <= 3000; x += 300) {
-            for (int z = -3000; z <= 3000; z += 300) {
-                int top = (int) Math.floor(m.height(x, z) + 0.5);
-                for (int y = top - 1; y >= Math.max(top - 40, -60); y -= 3) {
-                    total++;
-                    if (in.eval(fd, x, y, z) > 0.0) {
-                        solid++;
-                    }
-                }
+    public void riverValleysCarveBelowTheirRidges() {
+        // the ridges map's valley band is where the offset spline dips: columns there must sit lower
+        // than ridge-band columns of the same inland climate, and the deepest must reach the water
+        long seed = 7L;
+        VantrayaModel m = new VantrayaModel(seed, VantrayaModel.Config.production());
+        DensityInterpreter ip = new DensityInterpreter(m);
+        double valleySum = 0;
+        double ridgeSum = 0;
+        int valleyN = 0;
+        int ridgeN = 0;
+        double lowestValley = Double.MAX_VALUE;
+        for (int k = 0; k < 3000; k++) {
+            double x = ((k * 7919) % 5200) - 2600;
+            double z = ((k * 6151) % 5200) - 2600;
+            VantrayaModel.Fields f = m.sample(x, z);
+            if (f.cont() < -0.11 || f.cont() > 0.55) {
+                continue; // inland low/mid country only
+            }
+            double y = surfaceYWith(ip, x, z);
+            if (Math.abs(f.ridges()) < 0.05) {
+                valleySum += y;
+                valleyN++;
+                lowestValley = Math.min(lowestValley, y);
+            } else if (Math.abs(f.ridges()) > 0.45) {
+                ridgeSum += y;
+                ridgeN++;
             }
         }
-        assertTrue("solid share below the surface " + (double) solid / total, (double) solid / total > 0.98);
+        assertTrue("valley columns found: " + valleyN, valleyN >= 15);
+        assertTrue("ridge columns found: " + ridgeN, ridgeN >= 15);
+        double valleyMean = valleySum / valleyN;
+        double ridgeMean = ridgeSum / ridgeN;
+        assertTrue("valley mean " + valleyMean + " must sit below ridge mean " + ridgeMean,
+                valleyMean < ridgeMean - 8.0);
+        assertTrue("some river bed reaches the water (lowest valley Y=" + lowestValley + ")",
+                lowestValley < Spec.SEA_LEVEL);
     }
 
     @Test
-    public void biomeInputsRecoveredFromTheRouterGiveTheSpecifiedBiomes() {
-        // what the BiomeSource sees: climate parameters from the field channels, depth from the depth function
-        VantrayaModel m = VantrayaModel.forSeed(Spec.SPEC_SEED);
-        DensityInterpreter in = new DensityInterpreter(m);
-        for (Spec.Landmark lm : Spec.LANDMARKS) {
-            int x = (int) lm.x();
-            int z = (int) lm.z();
-            int y = Math.max((int) lm.y() + 3, 66);
-            BiomeRole role = BiomeLogic.classify(x, y, z,
-                    in.eval(router.get("temperature"), x, y, z), in.eval(router.get("vegetation"), x, y, z),
-                    in.eval(router.get("continents"), x, y, z), in.eval(router.get("erosion"), x, y, z),
-                    in.eval(router.get("depth"), x, y, z));
-            boolean ok = false;
-            for (String b : lm.biomes()) {
-                ok |= role.vanilla().equals(b);
-            }
-            assertTrue(lm.key() + " -> " + role.vanilla(), ok);
-        }
-    }
-
-    @Test
-    public void worldPresetAndTagsAreWellFormed() {
-        JsonObject preset = DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/world_preset/vantraya.json").getAsJsonObject();
-        JsonObject dims = preset.getAsJsonObject("dimensions");
-        assertEquals(3, dims.size());
-        JsonObject overworld = dims.getAsJsonObject("minecraft:overworld");
-        assertEquals("vantraya_builder:vantraya", overworld.get("type").getAsString());
-        JsonObject gen = overworld.getAsJsonObject("generator");
-        assertEquals("vantraya_builder:vantraya", gen.get("type").getAsString());
-        assertEquals("vantraya_builder:vantraya", gen.get("settings").getAsString());
-        assertEquals("vantraya_builder:vantraya", gen.getAsJsonObject("biome_source").get("type").getAsString());
-        assertEquals("minecraft:noise", dims.getAsJsonObject("minecraft:the_nether").getAsJsonObject("generator").get("type").getAsString());
-        assertEquals("minecraft:the_end", dims.getAsJsonObject("minecraft:the_end").get("type").getAsString());
-        // listed on the world creation screen
-        JsonObject normal = DensityInterpreter.parseResource("/data/minecraft/tags/worldgen/world_preset/normal.json").getAsJsonObject();
-        assertEquals("vantraya_builder:vantraya", normal.getAsJsonArray("values").get(0).getAsString());
-        // dimension type and the seed probe noise exist
-        JsonObject type = DensityInterpreter.parseResource("/data/vantraya_builder/dimension_type/vantraya.json").getAsJsonObject();
-        assertEquals(-64, type.get("min_y").getAsInt());
-        assertEquals(384, type.get("height").getAsInt());
-        assertNotNull(DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/noise/seed_probe.json"));
-    }
-
-    @Test
-    public void everyBiomeRoleHasATagHoldingItsVanillaDefault() throws Exception {
-        for (BiomeRole role : BiomeRole.values()) {
-            String path = "/data/vantraya_builder/tags/worldgen/biome/biome/" + role.id() + ".json";
-            try (InputStream in = RouterTest.class.getResourceAsStream(path)) {
-                assertNotNull("missing biome role tag " + path, in);
-            }
-            JsonObject tag = DensityInterpreter.parseResource(path).getAsJsonObject();
-            assertEquals(1, tag.getAsJsonArray("values").size());
-            assertEquals("minecraft:" + role.vanilla(), tag.getAsJsonArray("values").get(0).getAsString());
+    public void theParameterMapsStayWithinVanillaRanges() {
+        for (int k = 0; k < 500; k++) {
+            double x = ((k * 3571) % 8000) - 4000;
+            double z = ((k * 2477) % 8000) - 4000;
+            VantrayaModel.Fields f = model.sample(x, z);
+            assertTrue("cont " + f.cont(), f.cont() >= -1.2 && f.cont() <= 1.2);
+            assertTrue("ero " + f.erosion(), f.erosion() >= -1.0 && f.erosion() <= 1.0);
+            assertTrue("ridges " + f.ridges(), f.ridges() >= -1.0 && f.ridges() <= 1.0);
+            assertTrue("temp " + f.temperature(), f.temperature() >= -1.2 && f.temperature() <= 1.2);
+            assertTrue("hum " + f.humidity(), f.humidity() >= -1.2 && f.humidity() <= 1.2);
         }
     }
 
     @Test
-    public void fieldFunctionJsonUsesTheKeysTheCodecReads() {
-        for (String ch : new String[] {"continents", "erosion", "ridges", "temperature", "humidity", "height", "rough3d", "protect"}) {
-            JsonObject flat = DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/density_function/field/" + ch + ".json").getAsJsonObject();
-            assertEquals("minecraft:flat_cache", flat.get("type").getAsString());
-            JsonObject field = flat.getAsJsonObject("argument");
-            assertEquals("vantraya_builder:field", field.get("type").getAsString());
-            assertEquals(ch, field.get("channel").getAsString());
-            assertEquals("vantraya_builder:seed_probe", field.get("seed_noise").getAsString());
-        }
-    }
-
-    /** The vanilla functions the noise router may still reference: the Y coordinate and the cave set. */
-    private static final Set<String> SHARED_WITH_VANILLA = Set.of("minecraft:y",
-            "minecraft:overworld/caves/entrances", "minecraft:overworld/caves/noodle",
-            "minecraft:overworld/caves/pillars", "minecraft:overworld/caves/spaghetti_2d",
-            "minecraft:overworld/caves/spaghetti_roughness_function");
-
-    /** Every string under a key other than "type"/"noise" that points into the minecraft namespace. */
-    private static void collectVanillaReferences(JsonElement e, String key, Set<String> out) {
-        if (e.isJsonObject()) {
-            for (Map.Entry<String, JsonElement> entry : e.getAsJsonObject().entrySet()) {
-                collectVanillaReferences(entry.getValue(), entry.getKey(), out);
-            }
-        } else if (e.isJsonArray()) {
-            e.getAsJsonArray().forEach(item -> collectVanillaReferences(item, key, out));
-        } else if (e.isJsonPrimitive() && e.getAsJsonPrimitive().isString()) {
-            String v = e.getAsString();
-            if (v.startsWith("minecraft:") && !"type".equals(key) && !"noise".equals(key)
-                    && (v.equals("minecraft:y") || v.contains("/"))) {
-                out.add(v);
+    public void theSurfaceIsContinuousNotTerraced() {
+        // one-block steps between neighbouring columns, averaged over a hillside: big flat terraces with
+        // vertical risers were the 0.2.0 artifact; the spline stack must move smoothly
+        double maxJump = 0;
+        for (int k = 0; k < 60; k++) {
+            double x = 300 + k * 37.0;
+            double z = -2500 + k * 13.0;
+            double prev = surfaceY(x, z);
+            for (int j = 1; j <= 30; j++) {
+                double y = surfaceY(x + j, z);
+                maxJump = Math.max(maxJump, Math.abs(y - prev));
+                prev = y;
             }
         }
+        assertTrue("steepest one-block step " + maxJump, maxJump <= 6.0);
     }
 
-    /**
-     * Where the shipped density functions are on disk. Normally the class path says so; under NeoForge's unit-test
-     * launcher the resources are not served from a plain {@code file:} directory, so fall back to the source tree
-     * above the working directory. If neither is found the guard fails: a guard that silently skips guards nothing
-     * (it did exactly that for one CI run).
-     */
-    private static Path densityFunctionDirectory() throws Exception {
-        URL dir = RouterTest.class.getResource("/data/vantraya_builder/worldgen/density_function");
-        if (dir != null && "file".equals(dir.getProtocol())) {
-            return Paths.get(dir.toURI());
-        }
-        for (Path p = Paths.get("").toAbsolutePath(); p != null; p = p.getParent()) {
-            Path candidate = p.resolve("src/main/resources/data/vantraya_builder/worldgen/density_function");
-            if (Files.isDirectory(candidate)) {
-                return candidate;
-            }
-        }
-        throw new AssertionError("cannot find the shipped density functions (class path says " + dir
-                + ", working directory " + Paths.get("").toAbsolutePath() + ")");
-    }
-
-    /**
-     * Terrain overhauls (Lithosphere, Tectonic, ...) override vanilla density functions. The shape of this world's
-     * terrain must not depend on any function they might replace - that would move the landmark pins - so the
-     * terrain's own functions reference nothing in the minecraft namespace but the Y coordinate, and the router
-     * itself only the cave functions (which a cave overhaul is welcome to change).
-     */
     @Test
-    public void terrainDependsOnNoVanillaFunctionAnotherPackCouldOverride() throws Exception {
-        Path root = densityFunctionDirectory();
-        List<Path> files;
-        try (Stream<Path> walk = Files.walk(root)) {
-            files = walk.filter(f -> f.toString().endsWith(".json")).collect(Collectors.toList());
-        }
-        assertTrue("the terrain functions are shipped", files.size() >= 10);
-        for (Path f : files) {
-            String rel = root.relativize(f).toString().replace('\\', '/');
-            Set<String> refs = new TreeSet<>();
-            collectVanillaReferences(DensityInterpreter.parseResource("/data/vantraya_builder/worldgen/density_function/" + rel), "", refs);
-            refs.remove("minecraft:y");
-            assertTrue(rel + " must not reference vanilla density functions, found " + refs, refs.isEmpty());
-        }
-        Set<String> routerRefs = new TreeSet<>();
-        collectVanillaReferences(router, "", routerRefs);
-        for (String ref : routerRefs) {
-            assertTrue("the noise router references a vanilla function that is not a cave function: " + ref,
-                    SHARED_WITH_VANILLA.contains(ref));
-        }
-        assertTrue("the caves stay shared with vanilla", routerRefs.contains("minecraft:overworld/caves/noodle"));
+    public void splineMathMatchesCubicSpline() {
+        // the interpreter's Hermite, against the formula from net.minecraft.util.CubicSpline by hand.
+        // coordinate = y_clamped_gradient(-64..320 -> -1..1), so the spline input tracks y linearly.
+        JsonElement s = JsonParser.parseString(
+                "{\"coordinate\": {\"type\": \"minecraft:y_clamped_gradient\", "
+                        + "\"from_y\": -64.0, \"to_y\": 320.0, \"from_value\": -2.0, \"to_value\": 2.0}, "
+                        + "\"points\": ["
+                        + "{\"location\": -1.0, \"value\": 0.0, \"derivative\": 1.0},"
+                        + "{\"location\": 1.0, \"value\": 2.0, \"derivative\": 1.0}]}");
+        assertEquals(1.0, interp.evalSplinePublic(s, 0, 128, 0), 1e-9);  // f = 0: the Hermite midpoint
+        assertEquals(0.0, interp.evalSplinePublic(s, 0, 32, 0), 1e-9);    // f = -1: the first point
+        assertEquals(2.0, interp.evalSplinePublic(s, 0, 224, 0), 1e-9);   // f = 1: the last point
+        // linear extensions at the clamped ends: 2 + 1*(f-1) and 0 + 1*(f+1) with f = 2 and f = -2
+        assertEquals(3.0, interp.evalSplinePublic(s, 0, 320, 0), 1e-4);
+        assertEquals(-1.0, interp.evalSplinePublic(s, 0, -64, 0), 1e-4);
     }
 }

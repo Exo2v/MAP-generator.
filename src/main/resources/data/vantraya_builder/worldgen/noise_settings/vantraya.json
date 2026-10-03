@@ -237,7 +237,10 @@
                         "argument": {
                           "type": "minecraft:mul",
                           "argument1": "vantraya_builder:depth",
-                          "argument2": 3.0
+                          "argument2": {
+                            "type": "minecraft:cache_2d",
+                            "argument": "vantraya_builder:factor"
+                          }
                         }
                       }
                     }

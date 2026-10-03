@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -15,7 +14,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.BiomeSource;
@@ -26,7 +24,6 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
-import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
@@ -35,18 +32,19 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 import net.minecraft.world.level.levelgen.synth.NormalNoise;
 
 /**
- * The Vantraya chunk generator: vanilla's noise generator - caves, aquifers, ore veins, structures, features
- * all as usual - fed by the specification's height field (through the noise settings' density functions) plus
- * the small passes the specification calls for and a density function cannot express:
- * <ol>
- *   <li>at the structure step, {@link StructurePolicy} throws out the structures that do not belong here;</li>
- *   <li>after the noise fill, open water is drained from the caldera and the rivers and lakes get their water
- *       ({@link RiverWater});</li>
- *   <li>after the biome surface rules, the slope-aware surface table is applied and the caldera's lava poured.</li>
- * </ol>
- * Because it is still a {@code NoiseBasedChunkGenerator} wired through normal noise settings, other mods'
- * hooks (Lithostitched noise-router wrappers, surface-rule injection, biome modifiers that add features to
- * biomes, structure sets ...) keep working.
+ * The Vantraya chunk generator: vanilla's noise generator - splines, caves, aquifers, ore veins, rivers,
+ * structures, features all as usual - driven by the specification's parameter maps through the noise
+ * settings' density functions. Since 0.3.0 there are no post-passes at all: terrain, river valleys and
+ * aquifer water all come out of the same fields through vanilla's offset / factor / jaggedness splines, so
+ * nothing can desync (the play-test document "Rivers aren't spawning only these puddles" asked for exactly
+ * this rework). Two small touches remain: {@link UplandWater} gives the carved valleys their sheet of
+ * water (aquifers only fill below sea level), and at the structure step {@link StructurePolicy} throws
+ * out the structures that do not belong here.
+ *
+ * <p>Because it is still a {@code NoiseBasedChunkGenerator} wired through normal noise settings and a
+ * vanilla multi-noise biome source, other mods' hooks (Lithostitched noise-router wrappers, surface-rule
+ * injection, TerraBlender regions, biome modifiers that add features to biomes, structure sets ...) keep
+ * working.
  */
 public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
 
@@ -159,31 +157,15 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
     }
 
     @Override
-    public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState,
-                                                        StructureManager structureManager, ChunkAccess chunk) {
+    public java.util.concurrent.CompletableFuture<net.minecraft.world.level.chunk.ChunkAccess> fillFromNoise(
+            net.minecraft.world.level.levelgen.blending.Blender blender, RandomState randomState,
+            StructureManager structureManager, net.minecraft.world.level.chunk.ChunkAccess chunk) {
         return super.fillFromNoise(blender, randomState, structureManager, chunk).thenApply(filled -> {
-            VantrayaModel model = model(randomState);
-            if (VantrayaConfig.keepCalderaDry()) {
-                CalderaFluids.drain(filled, model);
-            }
             if (VantrayaConfig.fillRivers()) {
-                RiverWater.fill(filled, model);
+                UplandWater.fill(filled, this, randomState, model(randomState), filled.getHeightAccessorForGeneration());
             }
             return filled;
         });
-    }
-
-    @Override
-    public void buildSurface(WorldGenRegion level, StructureManager structureManager, RandomState randomState,
-                             ChunkAccess chunk) {
-        super.buildSurface(level, structureManager, randomState, chunk);
-        VantrayaModel model = model(randomState);
-        if (VantrayaConfig.paintSurface()) {
-            SurfacePainter.paint(chunk, model);
-        }
-        if (VantrayaConfig.keepCalderaDry()) {
-            CalderaFluids.pourLava(chunk, model);
-        }
     }
 
     @Override
@@ -193,7 +175,8 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
         String where = f.landmark() >= 0 && f.landmark() < Spec.LANDMARKS.size()
                 ? Spec.LANDMARKS.get(f.landmark()).name()
                 : (f.landmark() == Spec.VEIL_ID ? Spec.VEIL.name() : "open land");
-        info.add(String.format(Locale.ROOT, "Vantraya: %s  H=%.1f  tier %d  T=%.2f H=%.2f  C=%.2f E=%.2f R=%.2f",
-                where, f.height(), f.tier(), f.temperature(), f.humidity(), f.cont(), f.erosion(), f.ridges()));
+        info.add(String.format(Locale.ROOT, "Vantraya: %s  tier %d  T=%.2f H=%.2f  C=%.2f E=%.2f R=%.2f%s",
+                where, f.tier(), f.temperature(), f.humidity(), f.cont(), f.erosion(), f.ridges(),
+                f.valley() ? "  [river valley]" : ""));
     }
 }

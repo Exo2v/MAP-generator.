@@ -63,10 +63,14 @@ public final class StructurePolicy {
         return false;
     }
 
-    /** True when the specification's model has river or lake water on this column. */
+    /**
+     * True when this column is probably water in the finished world: the ocean bands of the continents
+     * map, or a river valley (the ridges map's valley band, where the offset spline carves a channel and
+     * the aquifer fills it) low enough that the fill reaches it.
+     */
     public static boolean isWetSite(VantrayaModel.Fields f) {
-        return f.river() > 0.3 || f.lake() > 0.4
-                || (f.height() < Spec.SEA_LEVEL && f.cont() > 0.02 && !f.noWater());
+        return f.cont() < -0.19                      // ocean, coast shallows, the Sunken Reach's shelf
+                || (f.valley() && f.cont() < 0.30); // a carved river valley in the low or mid country
     }
 
     /** May this structure not generate at this site? */

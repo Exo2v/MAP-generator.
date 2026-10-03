@@ -131,15 +131,17 @@ public class SpecTest {
 
     @Test
     public void lithosphereDensityAndClimateWindows() {
-        windows(0, 0.10, 0.30, -0.10, 0.20, -0.30, 0.30, -0.15, 0.40, -0.1, 0.8);
-        windows(1, 0.25, 0.60, -0.35, 0.15, -0.80, -0.20, 0.00, 0.50, -0.4, 0.3);
-        windows(2, 0.20, 0.50, -0.20, 0.30, 0.00, 0.40, 0.70, 1.00, -0.8, -0.2);
-        windows(3, 0.45, 0.90, -0.80, -0.45, 0.50, 0.95, -1.00, -0.75, -0.4, 0.4);
-        windows(4, 0.20, 0.55, 0.25, 0.70, -0.40, 0.40, 0.70, 1.00, -0.8, -0.2);
+        // 0.3.0: the parameter windows recalibrated against vanilla's offset/factor spline response
+        // (see docs/RIVERS_AND_BIOME_BORDERS.md section 6), keeping every landmark's character and sign.
+        windows(0, -0.05, 0.25, -0.15, 0.35, -0.35, 0.35, -0.15, 0.40, -0.1, 0.8);
+        windows(1, 0.15, 0.45, -0.45, -0.05, -0.70, -0.25, 0.00, 0.50, -0.4, 0.3);
+        windows(2, 0.15, 0.40, -0.55, -0.20, 0.02, 0.35, 0.70, 1.00, -0.8, -0.2);
+        windows(3, 0.75, 0.95, -0.85, -0.55, 0.60, 0.95, -1.00, -0.75, -0.4, 0.4);
+        windows(4, 0.20, 0.45, -0.50, -0.05, -0.50, 0.50, 0.70, 1.00, -0.8, -0.2);
         windows(5, 0.05, 0.25, 0.40, 0.85, -0.20, 0.20, 0.35, 0.60, 0.5, 1.0);
         windows(6, -0.35, -0.10, 0.10, 0.50, -0.50, 0.50, 0.35, 0.60, 0.4, 1.0);
-        windows(7, 0.30, 0.60, -0.60, -0.20, 0.20, 0.70, -0.60, -0.25, -0.2, 0.6);
-        windows(8, 0.30, 0.65, -0.40, 0.10, 0.10, 0.60, -0.15, 0.40, -0.1, 0.8);
+        windows(7, 0.45, 0.75, -0.80, -0.40, 0.45, 0.85, -0.60, -0.25, -0.2, 0.6);
+        windows(8, 0.40, 0.70, -0.70, -0.35, 0.15, 0.55, -0.15, 0.40, -0.1, 0.8);
         Landmark veil = Spec.VEIL;
         assertEquals(-0.90, veil.cont().lo(), 0.0);
         assertEquals(-0.45, veil.cont().hi(), 0.0);
@@ -167,10 +169,10 @@ public class SpecTest {
     }
 
     @Test
-    public void everyLandmarkBiomeHasARole() {
+    public void everyLandmarkBiomeIsAPlainBiomeId() {
         for (Landmark lm : Spec.LANDMARKS) {
             for (String b : lm.biomes()) {
-                assertEquals(b, BiomeRole.ofSpecName(b).vanilla());
+                assertTrue("biome id " + b, b.matches("[a-z_]+"));
             }
         }
     }

@@ -20,16 +20,6 @@ public final class VantrayaConfig {
             .comment("Start new Vantraya worlds at the Forgotten Coast (0, 68, 2500), the specification's spawn.")
             .define("spawnAtForgottenCoast", true);
 
-    public static final ModConfigSpec.BooleanValue PAINT_SURFACE = BUILDER
-            .comment("Apply the specification's slope-aware surface table (soil / scree / bare rock / treeline /",
-                    "caldera / Veil of Salt crust) after the biome surface rules. Turn off to keep pure biome surfaces.")
-            .define("paintSurface", true);
-
-    public static final ModConfigSpec.BooleanValue KEEP_CALDERA_DRY = BUILDER
-            .comment("No water inside the Ashen Caldera: open water in the crater is removed and the crater floor",
-                    "gets its lava basins (specification: \"absolutely no water\").")
-            .define("keepCalderaDry", true);
-
     public static final ModConfigSpec.BooleanValue ENFORCE_WORLD_BORDER = BUILDER
             .comment("Set an 8,000-block world border centred on the origin when a Vantraya world is first started,",
                     "matching the specification's finite canvas. Beyond it the Veil of Salt abyss continues.")
@@ -40,8 +30,8 @@ public final class VantrayaConfig {
             .define("logCompatReport", true);
 
     public static final ModConfigSpec.BooleanValue FILL_RIVERS = BUILDER
-            .comment("Fill the specification's river and lake channels with water (and ice where it is cold) so the",
-                    "continent can be travelled by water. Turn off for dry valleys.")
+            .comment("Lay the sheet of water in the carved river valleys (the upland waterways) so the continent",
+                    "can be travelled by water. Turn off for dry valleys. Sea and aquifer water are unaffected.")
             .define("fillRivers", true);
 
     public static final ModConfigSpec.BooleanValue STRUCTURE_POLICY = BUILDER
@@ -71,14 +61,6 @@ public final class VantrayaConfig {
 
     public static boolean spawnAtForgottenCoast() {
         return read(SPAWN_AT_FORGOTTEN_COAST, true);
-    }
-
-    public static boolean paintSurface() {
-        return read(PAINT_SURFACE, true);
-    }
-
-    public static boolean keepCalderaDry() {
-        return read(KEEP_CALDERA_DRY, true);
     }
 
     public static boolean enforceWorldBorder() {

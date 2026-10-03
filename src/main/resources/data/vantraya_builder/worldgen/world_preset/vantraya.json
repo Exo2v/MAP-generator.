@@ -5,7 +5,8 @@
       "generator": {
         "type": "vantraya_builder:vantraya",
         "biome_source": {
-          "type": "vantraya_builder:vantraya"
+          "type": "minecraft:multi_noise",
+          "preset": "minecraft:overworld"
         },
         "settings": "vantraya_builder:vantraya"
       }

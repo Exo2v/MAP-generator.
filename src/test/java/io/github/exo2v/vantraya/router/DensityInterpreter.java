@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -91,7 +92,55 @@ final class DensityInterpreter {
         return eval(o.get(key), x, y, z);
     }
 
+    /**
+     * Minecraft's {@code CubicSpline.Multipoint.apply}: monotone Hermite between the points, linear
+     * extension outside, nested values re-evaluated at the same input. Copied formula for formula from
+     * {@code net.minecraft.util.CubicSpline} so the offline terrain matches the engine's.
+     */
+    private double evalSpline(JsonElement s, double x, double y, double z) {
+        JsonObject so = s.getAsJsonObject();
+        double f = eval(so.get("coordinate"), x, y, z);
+        JsonArray pts = so.getAsJsonArray("points");
+        int n = pts.size();
+        double[] loc = new double[n];
+        double[] der = new double[n];
+        JsonElement[] val = new JsonElement[n];
+        for (int i = 0; i < n; i++) {
+            JsonObject p = pts.get(i).getAsJsonObject();
+            loc[i] = p.get("location").getAsDouble();
+            der[i] = p.get("derivative").getAsDouble();
+            val[i] = p.get("value");
+        }
+        int i = java.util.Arrays.binarySearch(loc, f);
+        i = i >= 0 ? i : -i - 2; // last index with loc[i] <= f, or -1
+        if (i < 0) {
+            return extend(f, loc, eval(val[0], x, y, z), der, 0);
+        }
+        if (i == n - 1) {
+            return extend(f, loc, eval(val[n - 1], x, y, z), der, n - 1);
+        }
+        double t = (f - loc[i]) / (loc[i + 1] - loc[i]);
+        double v0 = eval(val[i], x, y, z);
+        double v1 = eval(val[i + 1], x, y, z);
+        double h = loc[i + 1] - loc[i];
+        double e0 = der[i] * h - (v1 - v0);
+        double e1 = -der[i + 1] * h + (v1 - v0);
+        return (v0 + (v1 - v0) * t) + t * (1.0 - t) * (e0 + (e1 - e0) * t);
+    }
+
+    private static double extend(double f, double[] loc, double v, double[] der, int k) {
+        return der[k] == 0.0 ? v : v + der[k] * (f - loc[k]);
+    }
+
+    /** Test hook: evaluate a bare spline value object. */
+    double evalSplinePublic(JsonElement s, double x, double y, double z) {
+        return evalSpline(s, x, y, z);
+    }
+
     private double evalObject(JsonObject o, double x, double y, double z) {
+        if (o.has("coordinate") && o.has("points") && !o.has("type")) {
+            return evalSpline(o, x, y, z); // a nested spline value, without the type wrapper
+        }
         String type = o.get("type").getAsString();
         switch (type) {
             case "minecraft:add":
@@ -148,6 +197,12 @@ final class DensityInterpreter {
             case "minecraft:cache_all_in_cell":
             case "minecraft:blend_density":
                 return arg(o, "argument", x, y, z);
+            case "minecraft:blend_alpha":
+                return 1.0; // no neighbour-chunk blending far from a world edge
+            case "minecraft:blend_offset":
+                return 0.0;
+            case "minecraft:spline":
+                return evalSpline(o.get("spline"), x, y, z);
             case "minecraft:noise":
             case "minecraft:shifted_noise":
             case "minecraft:weird_scaled_sampler":
@@ -166,12 +221,8 @@ final class DensityInterpreter {
                         return f.temperature();
                     case "humidity":
                         return f.humidity();
-                    case "height":
-                        return f.height();
-                    case "rough3d":
-                        return f.rough3d();
                     case "protect":
-                        return Spec.protection(x, z);
+                        return f.protect();
                     default:
                         throw new IllegalArgumentException("unknown channel " + o);
                 }

@@ -1,194 +1,132 @@
 package io.github.exo2v.vantraya.core;
 
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
-import io.github.exo2v.vantraya.core.Instances.Instance;
 import io.github.exo2v.vantraya.core.Spec.Kind;
 import io.github.exo2v.vantraya.core.Spec.Landmark;
 import io.github.exo2v.vantraya.core.Spec.Window;
 
 /**
- * The continent of Vantyra as a pure function of a world seed and a block coordinate.
+ * The continent of Vantyra as six noise maps - the specification's "noise maps that give these specific
+ * land features" - evaluated per column.
  *
- * <p>This is the offline engine's {@code AshenfallBuilder.build} + {@code apply_ashenfall} chain
- * (HANDOFF sections 5.2 - 5.7, 5.11, 5.12) re-expressed so that any single column can be evaluated on
- * its own, which is what a live chunk generator needs. The specification's tables stay the authority
- * and noise only supplies texture: every landmark is shaped to land on its stated elevation.
+ * <p>0.3.0 reworked the whole generator onto vanilla's Perlin-noise spline pipeline (the play-test
+ * document "Rivers aren't spawning only these puddles", 3 October 2026). The model no longer computes a
+ * height field at all: it produces the same six <em>parameter maps</em> vanilla's own overworld runs on -
+ * {@code continents}, {@code erosion}, {@code ridges}, {@code temperature}, {@code humidity} - and the
+ * vanilla offset / factor / jaggedness / depth / sloped-cheese splines (kept as data under
+ * {@code worldgen/density_function/}) turn those maps into terrain. Rivers, valleys, peaks and plains are
+ * therefore <em>level sets of the same fields that made the ground</em>, exactly as in vanilla and in the
+ * studied mods (Tectonic's lesson): no post-pass can desync from the terrain.
  *
- * <p>Stages that are global in the offline pipeline are replaced by local equivalents:
+ * <p>How each map is built:
  * <ul>
- *   <li>{@code windows()} percentile bounds -> {@link Calibration} constants;</li>
- *   <li>distance-transform feathers -> closed-form signed distances ({@link Regions});</li>
- *   <li>priority-flood / flow-accumulation rivers and lakes -> {@link Drainage}: the same two algorithms the
- *       offline engine runs (priority flood for lakes, D8 flow accumulation for rivers), on a lattice per
- *       world seed, so channels follow real drainage, water surfaces run downhill, and lakes are real
- *       basins at their spill level - honouring the same rules (valleys where {@code R ~ 0} feed the
- *       network, no standing water on dry landforms, absolutely no water in the caldera). The old
- *       river-valley stand-in that
- *       honours the same rules (valleys where {@code R ~ 0}, no standing water on dry landforms,
- *       absolutely no water in the caldera);</li>
- *   <li>post-hydrology landmark re-pinning -> retired: the continent is generated as zones, not pins
- *       (0.2.0), so no column is clamped to an exact elevation any more;</li>
- *   <li>moisture advection -> a closed-form moisture budget.</li>
+ *   <li><b>continents</b> - the island: a warped radial coast (specification shape), a shelf spline, an
+ *       inland bump, and the landmark {@code cont} windows. In vanilla's bands the shelf is ocean, the
+ *       shore band is coast, and the interior runs up the near/mid/far-inland bands; the Sunken Reach's
+ *       window drops to the mushroom-fields band where the spec wants its reef.</li>
+ *   <li><b>erosion</b> - regional relief class (low = dramatic, high = flat), windowed per landmark so
+ *       the Spine is a mountain range and the Fen a plain.</li>
+ *   <li><b>ridges</b> - the peaks-and-valleys map. Its <em>zero contour is the river network</em>:
+ *       vanilla's offset spline dips where {@code ridges ~ 0} ("valleys" band) and the biome builder
+ *       calls that band {@code river}. Zero contours of smooth noise meander, join and fork like real
+ *       drainage and always run from the interior toward the falling continentalness, i.e. downhill to
+ *       the sea; aquifers fill the carved valleys, at sea level near the coast and <em>at altitude in the
+ *       uplands</em> - the upland waterways the spec asked for.</li>
+ *   <li><b>temperature / humidity</b> - latitude + regional noise + moisture advection, windowed per
+ *       landmark (the Glacial Spine frozen, the Dunes hot and dry, the Fen lush).</li>
  * </ul>
+ *
+ * <p>Biomes are selected by vanilla's multi-noise biome builder from these same maps
+ * ({@code multi_noise} + {@code preset: minecraft:overworld}), so biome borders are vanilla's nearest-
+ * parameter curves and TerraBlender-based biome mods work in a Vantraya world.
  *
  * <p>Instances are immutable and thread-safe; sampling reuses a small per-thread cache so that the
  * several density-function channels evaluated at one column cost one evaluation.
  */
 public final class VantrayaModel {
 
-    /** Tunables that change how faithfully (or how practically) the offline engine is mirrored. */
+    /** Tunables that change how faithfully (or how practically) the specification's climate is mirrored. */
     public record Config(Calibration calibration, double instanceNoiseOffset, boolean seamlessCoast,
-                         boolean carveWater, boolean repin, boolean borealBuffer) {
+                         boolean borealBuffer) {
 
         /** What the Minecraft world type uses for an arbitrary world seed. */
         public static Config production() {
-            return new Config(Calibration.DEFAULT, 3998.0, true, true, true, true);
+            return new Config(Calibration.DEFAULT, 3998.0, true, true);
         }
 
         /** The canonical build (seed 20250929): the reference build's own percentile bounds. */
         public static Config canonical() {
-            return new Config(Calibration.SPEC_SEED_REFERENCE, 3998.0, true, true, true, true);
+            return new Config(Calibration.SPEC_SEED_REFERENCE, 3998.0, true, true);
         }
 
         /**
-         * Mirror of the offline engine's analytic builder (no hydrology, no re-pin, no boreal buffer, the
-         * table's west-axis seam kept) at the given raster cell size - used to cross-check the two
-         * implementations.
+         * Legacy shape kept for the rendering tools: fixed calibration, no boreal buffer, the table's
+         * west-axis seam kept.
          */
         public static Config parity(int cellSize, Calibration calibration) {
-            return new Config(calibration, 4000.0 - 0.5 * cellSize, false, false, false, false);
+            return new Config(calibration, 4000.0 - 0.5 * cellSize, false, false);
         }
     }
 
-    /** Everything the generator needs to know about one column. Heights are in blocks, climate in spec units. */
+    /**
+     * The parameter maps at one column. {@code cont}, {@code erosion} and {@code ridges} are vanilla
+     * continentalness / erosion / weirdness units (roughly -1..1); {@code temperature} and
+     * {@code humidity} are vanilla climate units (roughly -1..1); {@code protect} is 1 within
+     * {@link Spec#PROTECT_RADIUS} of a landmark centre.
+     */
     public record Fields(
             double x, double z,
             double cont, double erosion, double ridges,
             double temperature, double humidity,
-            double demMacro, double height,
-            int landmark, boolean lava, boolean noWater, boolean noLake,
-            double river, double lake, double waterLine,
-            double rough3d, double pin,
-            double tempAsh, double humAsh) {
+            int landmark,
+            double protect) {
+
+        /** {@code ridges ~ 0} is the valley band: the river network. */
+        public boolean valley() {
+            return Math.abs(ridges) < VALLEY_BAND;
+        }
 
         public int tier() {
             return Spec.climateTier(temperature);
         }
     }
 
+    /** Vanilla's "valleys" weirdness slice is [-0.05, 0.05]; the river band is a hair wider here. */
+    public static final double VALLEY_BAND = 0.06;
+
     // ---------------------------------------------------------------------------------------
 
     private final long seed;
     private final Config cfg;
     private final Calibration cal;
-    private final List<Instance> spine;
-    private final List<Instance> needles;
-    private final int cordilleraIdx;
-    private final int spiresIdx;
+    private final int calderaIdx;
 
     public VantrayaModel(long seed, Config cfg) {
-        this(seed, cfg, null, null);
-    }
-
-    /**
-     * Test hook: use explicit instance lists instead of the seeded ones (for example the stations the
-     * offline engine stamped), so the rendering and composition maths can be compared like for like.
-     */
-    public VantrayaModel(long seed, Config cfg, List<Instance> spineOverride, List<Instance> needlesOverride) {
         this.seed = seed;
         this.cfg = cfg;
         this.cal = cfg.calibration();
         int ci = -1;
-        int si = -1;
         for (int i = 0; i < Spec.LANDMARKS.size(); i++) {
-            Kind k = Spec.LANDMARKS.get(i).kind();
-            if (k == Kind.CORDILLERA) {
+            if (Spec.LANDMARKS.get(i).kind() == Kind.CALDERA) {
                 ci = i;
-            } else if (k == Kind.SPIRES) {
-                si = i;
+                break;
             }
         }
-        this.cordilleraIdx = ci;
-        this.spiresIdx = si;
-        this.spine = spineOverride != null ? spineOverride
-                : (ci < 0 ? List.of() : Instances.buildCordillera(Spec.LANDMARKS.get(ci), shaperSeed(ci)));
-        this.needles = needlesOverride != null ? needlesOverride
-                : (si < 0 ? List.of() : Instances.buildNeedles(Spec.LANDMARKS.get(si), shaperSeed(si)));
+        this.calderaIdx = ci;
     }
 
-    /** The drainage lattice of this world, built once from the pre-water terrain and then queried. */
-    private volatile Drainage drainage;
-
-    public Drainage drainage() {
-        Drainage d = this.drainage;
-        if (d == null) {
-            synchronized (this) {
-                d = this.drainage;
-                if (d == null) {
-                    d = new Drainage((x, z) -> {
-                        Base b = base(x, z);
-                        return new Drainage.CellSample(b.dem(), b.noWater(), b.noLake());
-                    });
-                    this.drainage = d;
-                }
-            }
-        }
-        return d;
-    }
-
-    private static final ConcurrentHashMap<Long, VantrayaModel> CACHE = new ConcurrentHashMap<>();
-
-    /**
-     * The production model of a world seed (cached; at most a handful of seeds are ever live). The
-     * canonical seed {@link Spec#SPEC_SEED} reproduces the shipped build's mountain layout exactly.
-     */
+    /** The production model for one world seed. */
     public static VantrayaModel forSeed(long seed) {
-        VantrayaModel m = CACHE.get(seed);
-        if (m == null) {
-            if (CACHE.size() > 8) {
-                CACHE.clear();
-            }
-            m = CACHE.computeIfAbsent(seed, VantrayaModel::create);
-        }
-        return m;
-    }
-
-    private static VantrayaModel create(long seed) {
-        if (seed == Spec.SPEC_SEED) {
-            return new VantrayaModel(seed, Config.canonical(), SpecSeedInstances.SPINE, SpecSeedInstances.NEEDLES);
-        }
         return new VantrayaModel(seed, Config.production());
     }
 
-    public long seed() {
-        return seed;
-    }
-
-    public Config config() {
-        return cfg;
-    }
-
-    public List<Instance> spine() {
-        return spine;
-    }
-
-    public List<Instance> needles() {
-        return needles;
-    }
-
-    /** {@code seed + idx * 137}, the per-landmark seed the offline engine hands each shaper. */
-    private long shaperSeed(int idx) {
-        return seed + idx * 137L;
-    }
-
     // ---------------------------------------------------------------------------------------
-    // per-thread sample cache
+    // sampling cache
     // ---------------------------------------------------------------------------------------
 
-    private static final int CACHE_SIZE = 1024;
+    private static final int CACHE_SIZE = 1 << 8;
 
     private static final class SampleCache {
         final long[] kx = new long[CACHE_SIZE];
@@ -196,9 +134,8 @@ public final class VantrayaModel {
         final Fields[] val = new Fields[CACHE_SIZE];
     }
 
-    private final ThreadLocal<SampleCache> local = ThreadLocal.withInitial(SampleCache::new);
+    private static final ThreadLocal<SampleCache> local = ThreadLocal.withInitial(SampleCache::new);
 
-    /** All macro fields of the column at {@code (x, z)}. */
     public Fields sample(double x, double z) {
         long bx = Double.doubleToLongBits(x);
         long bz = Double.doubleToLongBits(z);
@@ -315,25 +252,25 @@ public final class VantrayaModel {
     // compute
     // ---------------------------------------------------------------------------------------
 
-    /** Everything the water network needs to know about a column, before any water is cut into it. */
-    private record Base(double dem, double demMacro, double cont, double ero, double rid,
-                        double tAshUnit, double hAshUnit, double c, int owner, double pinMask,
-                        boolean lava, boolean noWater, boolean noLake) {
-    }
-
-    /** Steps 1-6 of the model: climate and terrain, with no hydrology. The drainage lattice samples this. */
-    private Base base(double x, double z) {
+    /** The six parameter maps at one column. */
+    private Fields compute(double x, double z) {
         // ---- 1. continentalness -------------------------------------------------------------
         double[] warp = new double[2];
         Noise.domainWarp(x, z, 2100.0, 900.0, seed + 17, 4, warp);
         double contRaw = rawContinentalness(x, z, warp[0], warp[1]);
-        double cont = windows(contRaw, Landmark::cont, 0.60, cal.contLo(), cal.contHi(), x, z);
+        double cont = windows(contRaw, Landmark::cont, 1.0, cal.contLo(), cal.contHi(), x, z);
 
         // ---- 2. erosion / ridges ------------------------------------------------------------
         double eroUnit = Mathx.stretch01(Noise.fbm(x, z, 4, 1500.0, seed + 31), cal.eroLo(), cal.eroHi());
-        double ero = windows(eroUnit * 2.0 - 1.0, Landmark::erosion, 0.70, -1.0, 1.0, x, z);
-        double ridUnit = Mathx.stretch01(Noise.fbm(x, z, 5, 1250.0, seed + 41), cal.ridLo(), cal.ridHi());
-        double rid = windows(ridUnit * 2.0 - 1.0, Landmark::ridges, 0.70, -1.0, 1.0, x, z);
+        double ero = windows(eroUnit * 2.0 - 1.0, Landmark::erosion, 1.0, -1.0, 1.0, x, z);
+
+        // The peaks-and-valleys map. The zero contour of this smooth field is the river network the
+        // offset spline carves and the biome builder calls "river"; warp it first so the network meanders.
+        double[] rwp = new double[2];
+        Noise.domainWarp(x, z, 900.0, 340.0, seed + 137, 3, rwp);
+        double ridUnit = Mathx.stretch01(Noise.fbm(rwp[0], rwp[1], 5, 1250.0, seed + 41), cal.ridLo(), cal.ridHi());
+        double rid = windows(ridUnit * 2.0 - 1.0, Landmark::ridges, 1.0, -1.0, 1.0, x, z);
+        rid = calderaRing(x, z, rid);
 
         // ---- 3. climate in spec units (the Ashenfall engine's _climate) ---------------------
         double genT = genericTempUnit(x, z);
@@ -370,283 +307,69 @@ public final class VantrayaModel {
         }
         t = Mathx.clamp(t, -1.2, 1.2);
         h = Mathx.clamp(h, -1.2, 1.2);
-        double tAshUnit = Mathx.saturate((t + 1.0) * 0.5);
-        double hAshUnit = Mathx.saturate((h + 1.0) * 0.5);
 
-        // ---- 4. base height and relief ------------------------------------------------------
-        double land = Mathx.smoothstep(-0.12, 0.28, cont);
-        double base = Tables.BASE_SPLINE.eval(cont);
-        double rid01 = Mathx.saturate(rid * 0.5 + 0.5);
-        double belt = Mathx.smoothstep(0.48, 0.95, rid01) * Mathx.smoothstep(0.20, 0.62, cont);
-        double ridgeAmp = 18.0 + 145.0 * belt;
-        double ridgeShape = Noise.ridgedFbm(x, z, 6, 1050.0, seed + 51);
-        double relief = ridgeAmp * ridgeShape * land;
-        double detailScale = Mathx.clamp(1.1 - 0.7 * (ero * 0.5 + 0.5), 0.2, 1.2);
-        double rolling = Noise.fbm(x, z, 4, 1150.0, seed + 61) * (4.0 + 9.0 * land);
-        double hills = Noise.fbm(x, z, 4, 420.0, seed + 71) * (3.0 + 6.0 * land);
-        double detail = Noise.fbm(x, z, 4, 120.0, seed + 81) * 2.6;
-        double demMacro = base + (relief + rolling + hills) * detailScale + detail * land;
-
-        // ---- 5. shelf, Veil of Salt and the nine landmarks ----------------------------------
-        double dem = demMacro;
-        double innerW = Mathx.smoothstep(Spec.SHELF_INNER - 900.0, Spec.SHELF_INNER, r);
-        double outerW = Mathx.smoothstep(Spec.SHELF_INNER, Spec.SHELF_OUTER, r);
-        double abyssW = Mathx.smoothstep(Spec.VEIL_RADIUS, Spec.VEIL_RADIUS + 220.0, r);
-        double drop = Spec.shelfDrop(r);
-        if (innerW > 0.0) {
-            dem = dem * (1.0 - innerW * 0.7) + (Spec.SEA_LEVEL + drop) * (innerW * 0.7);
-            double floor = Math.max(Spec.SEA_LEVEL + drop, Spec.ABYSS_FLOOR);
-            dem = dem * (1.0 - outerW) + floor * outerW;
-        }
-        if (abyssW > 0.0) {
-            double veilFloor = Spec.ABYSS_FLOOR + 3.0 + 5.0 * Mathx.stretch01(
-                    Noise.fbm(x, z, 3, 1400.0, seed + 1301), cal.veilLo(), cal.veilHi());
-            dem = dem * (1.0 - abyssW) + veilFloor * abyssW;
-        }
-
+        // ---- 4. protection and landmark ownership ------------------------------------------
+        double protect = Spec.protection(x, z);
         int owner = Regions.idAt(x, z);
-        boolean lava = false;
-        boolean basinFlag = false;
-        double pinMask = 0.0;
-        for (int idx = 0; idx < lms.size(); idx++) {
-            double sd = Regions.sdOwned(idx, x, z);
-            if (sd < -160.0) {
-                continue; // outside the feather's reach (it extends at most ~110 blocks past the border)
-            }
-            Landmark lm = lms.get(idx);
-            double width = 200.0;
-            double edge = Noise.fbm(x, z, 3, Math.max(260.0, width * 1.6), seed + 3000 + idx * 13L);
-            double wgt = Regions.noisyFeather(sd, edge, width, 0.55);
-            if (lm.kind() == Kind.CALDERA) {
-                if (wgt > 0.0) {
-                    Landforms.Caldera cd = Landforms.caldera(x, z, dem, seed);
-                    double blend = Mathx.saturate(wgt * 1.8);
-                    dem = dem * (1.0 - blend) + cd.target() * blend;
-                    boolean inside = sd > 0.0;
-                    if (inside) {
-                        lava |= cd.lava();
-                        basinFlag |= cd.basin();
-                    }
-                }
-            } else if (wgt > 0.0) {
-                double target = shape(idx, lm, x, z, dem);
-                boolean soft = lm.kind() == Kind.FEN || lm.kind() == Kind.DROWNED_SHELF || lm.kind() == Kind.COAST;
-                boolean hard = lm.kind() == Kind.QUARRY || lm.kind() == Kind.DUNES
-                        || lm.kind() == Kind.TERRACES || lm.kind() == Kind.SPIRES;
-                double strong = Mathx.saturate(wgt * (soft ? 1.25 : (hard ? 2.0 : 0.9)));
-                dem = dem * (1.0 - strong) + target * strong;
-            }
-        }
-        // Zones, not pins: the landmarks keep their place, character and elevation band, but no column is
-        // clamped to an exact Y any more. The play test asked for terrain that grows out of the noise
-        // ("more naturally generated"), and every per-column clamp was fighting the noise.
-        dem = Mathx.clamp(dem, Spec.ABYSS_FLOOR, Spec.SPINE_HIGH + 4.0);
 
-        // ---- 6. dry masks (HANDOFF 5.11) ----------------------------------------------------
-        boolean noWater = basinFlag || lava;
-        boolean noLake = owner >= 0 && owner < lms.size() && isDryKind(lms.get(owner).kind());
-        return new Base(dem, demMacro, cont, ero, rid, tAshUnit, hAshUnit, c, owner, pinMask,
-                lava, noWater, noLake);
+        return new Fields(x, z, cont, ero, rid, t, h, owner, protect);
     }
 
-    private Fields compute(double x, double z) {
-        Base b = base(x, z);
-        double dem = b.dem();
-        double demMacro = b.demMacro();
-        double cont = b.cont();
-        double ero = b.ero();
-        double rid = b.rid();
-        double tAshUnit = b.tAshUnit();
-        double hAshUnit = b.hAshUnit();
-        double c = b.c();
-        int owner = b.owner();
-        double pinMask = b.pinMask();
-        boolean lava = b.lava();
-        boolean noWater = b.noWater();
-        boolean noLake = b.noLake();
-        double r = Math.hypot(x, z);
-        List<Landmark> lms = Spec.LANDMARKS;
-
-        // ---- 7. rivers and lakes: the drainage network ---------------------------------------
-        double river = 0.0;
-        double lake = 0.0;
-        double waterLine = NO_WATER_LINE;
-        if (cfg.carveWater() && !noWater && r < Spec.SHELF_INNER) {
-            Drainage.At wa = drainage().at(x, z);
-            if (wa.wet() && wa.waterY() > NO_WATER_LINE + 1.0) {
-                waterLine = wa.waterY();
-                if (wa.lake() > wa.channel()) {
-                    // a real basin from the priority flood: the ground is already below the spill level,
-                    // so the lake needs no cut of its own - the fill pass puts the water in
-                    lake = noLake ? 0.0 : wa.lake();
-                    if (lake == 0.0) {
-                        waterLine = NO_WATER_LINE; // a dry landform keeps no pond, not even a bleeding edge
-                    }
-                } else {
-                    double hw = Math.max(wa.halfWidth(), 1.0);
-                    double t = wa.dist() / hw;
-                    double depth = 1.6 + 0.62 * hw;
-                    double u = Math.max(0.0, 1.0 - t * t);
-                    double bed = wa.waterY() - 0.5 - depth * u * u; // a smooth U inside the channel
-                    // The bank is a shoulder that meets the natural ground, never a wall: the cut fades
-                    // out over the last stretch of the cross-section so the channel has no rim (0.1.3's
-                    // profile ended in a step and the play test called it cookie-cutter).
-                    double cut = (1.0 - Mathx.smoothstep(1.0, 1.9, t)) * wa.channel();
-                    dem = dem + (Math.min(dem, bed) - dem) * cut;
-                    river = wa.channel() * (1.0 - Mathx.smoothstep(0.9, 1.7, t));
-                }
-            }
-        }
-
-        // ---- 8. altitude lapse on the finished surface (ClimateModel.finalize) ----------------
-        double above = Math.max(dem - Spec.SEA_LEVEL, 0.0);
-        double tFinalUnit = Mathx.saturate(tAshUnit - Math.min(above * 0.00275, 0.60));
-        if (cfg.borealBuffer()) {
-            // the belt must stay non-snowy on the *effective* temperature too, foothills included
-            tFinalUnit = Mathx.saturate((borealFloor((tFinalUnit * 2.0 - 1.0), x, z) + 1.0) * 0.5);
-        }
-        double hFinalUnit = Mathx.saturate(0.45 * hAshUnit
-                + 0.55 * (adv(c) * 0.85 + humidityPatch(x, z) * 0.15) - c * 0.10);
-
-        // ---- 9. how much 3D noise the density function may add ------------------------------
-        double rugged = Mathx.saturate((0.30 - ero) / 0.9);
-        if (owner == cordilleraIdx || owner == spiresIdx) {
-            rugged = Math.max(rugged, 0.9);
-        }
-        double rough3d = (0.12 + 0.88 * rugged) * (1.0 - pinMask) * (1.0 - 0.8 * river);
-
-        // A water surface at or below the finished ground (re-pinning lifts it near a landmark) means the
-        // channel is not cut here: this column is a bank and gets no water.
-        if (waterLine <= dem) {
-            waterLine = NO_WATER_LINE;
-        }
-        return new Fields(x, z, cont, ero, rid,
-                tFinalUnit * 2.0 - 1.0, hFinalUnit * 2.0 - 1.0,
-                demMacro, dem, owner, lava, noWater, noLake, river, lake, waterLine, rough3d, pinMask,
-                tAshUnit * 2.0 - 1.0, hAshUnit * 2.0 - 1.0);
-    }
-
-    /** Width of the mandatory non-snowy belt around the Glacial Spine (spec section 4, tier 1). */
-    public static final double BOREAL_BUFFER_WIDTH = 600.0;
+    // ---------------------------------------------------------------------------------------
+    // the Ashen Caldera: a ring of peaks around a sunken floor, as an anomaly of the ridges map
+    // ---------------------------------------------------------------------------------------
 
     /**
-     * The spec's tier-1 rule: a mandatory 600-block non-snowy boreal (pine taiga) belt separates the glacial
-     * tier from the temperate lowlands, so that snow never touches temperate plains. The offline engine
-     * only applies the 220-block landmark windows, which leaves temperate terrain touching the Spine's
-     * edge; here the temperature around the Spine's box is eased to the top of the tier-1 band
-     * ({@code -0.58}) at the edge and to {@code -0.40} at 600 blocks (both inside the spec's tier-1 range and
-     * the engine's boreal biome band), then released back to the regional climate over the next 300 blocks.
-     * Inside the box the ease fades out exactly as the Spine's own window ramps in, so the profile is
-     * continuous across the boundary; landmarks with their own windows (Hermit's Spire, Byzantine Choir)
-     * are applied afterwards and win.
+     * The caldera is the one landmark with a shape rather than a window: a ring valley-field around a
+     * flat centre, so the offset spline carves a crater - peaks on the rim, the throne's plateau in the
+     * middle. All of it is smooth Gaussian blending in the ridges map: no pins, no clamps.
      */
+    private double calderaRing(double x, double z, double rid) {
+        if (calderaIdx < 0) {
+            return rid;
+        }
+        Landmark lm = Spec.LANDMARKS.get(calderaIdx);
+        double taper = Regions.boxFeather(calderaIdx, x, z, 260.0);
+        if (taper <= 0.0) {
+            return rid;
+        }
+        double d = Math.hypot(x - lm.x(), z - lm.z());
+        double ring = Math.exp(-sq((d - CALDERA_RING_R) / CALDERA_RING_W));
+        double floor = Math.exp(-sq(d / CALDERA_FLOOR_R));
+        double t = rid * (1.0 - ring) + CALDERA_RING_RIDGES * ring;
+        t = t * (1.0 - floor) + CALDERA_FLOOR_RIDGES * floor;
+        return rid * (1.0 - taper) + t * taper;
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
+
+    private static final double CALDERA_RING_R = 430.0;
+    private static final double CALDERA_RING_W = 190.0;
+    private static final double CALDERA_FLOOR_R = 270.0;
+    private static final double CALDERA_RING_RIDGES = 0.78;
+    private static final double CALDERA_FLOOR_RIDGES = 0.06;
+
+    // ---------------------------------------------------------------------------------------
+    // climate helpers
+    // ---------------------------------------------------------------------------------------
+
     private double borealBuffer(double t, double x, double z) {
-        if (cordilleraIdx < 0) {
-            return t;
-        }
-        double sd = Regions.sdBox(Spec.LANDMARKS.get(cordilleraIdx), x, z); // > 0 inside the box
-        double w = BOREAL_BUFFER_WIDTH;
-        double k;
-        if (sd >= 0.0) {
-            k = 1.0 - Mathx.smoothstep(0.0, Regions.WINDOW_FEATHER, sd);
-        } else {
-            double outside = -sd;
-            if (outside >= w + 300.0) {
-                return t;
-            }
-            k = 1.0 - Mathx.smoothstep(w, w + 300.0, outside);
-        }
-        k = Mathx.saturate(k * 0.95);
-        double target = -0.58 + 0.18 * Mathx.smoothstep(0.0, w, Math.max(-sd, 0.0));
-        return t * (1.0 - k) + target * k;
+        double south = borealFloor(t, x, z);
+        return Math.min(t, south);
     }
 
-    /** Effective temperature below which the belt may not fall (the boreal band's snow-free lower edge). */
-    private static final double BOREAL_FLOOR = -0.62;
-
-    /**
-     * Outside the Spine's box, keep the lapse-adjusted temperature from dropping below the boreal band,
-     * so foothills inside the 600-block belt are taiga rather than snowy taiga (the specification's
-     * "non-snowy pine taiga buffer"). The ease fades out over the 300 blocks beyond the belt.
-     */
+    /** The cold floor south of the Veil, feathered with noise so its border is never a straight line. */
     private double borealFloor(double t, double x, double z) {
-        if (cordilleraIdx < 0) {
-            return t;
-        }
-        double sd = Regions.sdBox(Spec.LANDMARKS.get(cordilleraIdx), x, z);
-        if (sd >= 0.0) {
-            return t;
-        }
-        double outside = -sd;
-        double w = BOREAL_BUFFER_WIDTH;
-        if (outside >= w + 300.0) {
-            return t;
-        }
-        double k = Mathx.saturate((1.0 - Mathx.smoothstep(w, w + 300.0, outside)) * 0.95);
-        return t + k * Math.max(0.0, BOREAL_FLOOR - t);
+        double edge = Noise.fbm(x, z, 3, 2200.0, seed + 811) * 700.0;
+        double band = Mathx.smoothstep(Spec.VEIL_RADIUS - 900.0 + edge, Spec.VEIL_RADIUS + 400.0 + edge,
+                Math.hypot(x, z));
+        return Mathx.lerp(t, Math.min(t, -0.55), band);
     }
 
-    /** Land-side moisture after the advection steps, normalised against the wettest (ocean) cell. */
-    private static double adv(double c) {
-        return Mathx.saturate((moisture(c) - MOIST_MIN) / Math.max(1.4 - MOIST_MIN, 1e-9));
-    }
-
-    private static boolean isDryKind(Kind k) {
-        return k == Kind.CALDERA || k == Kind.DUNES || k == Kind.QUARRY || k == Kind.TERRACES || k == Kind.COAST;
-    }
-
-    private double shape(int idx, Landmark lm, double x, double z, double dem) {
-        long s = shaperSeed(idx);
-        switch (lm.kind()) {
-            case QUARRY:
-                return Landforms.quarry(x, z, lm, s);
-            case CORDILLERA:
-                return Landforms.cordillera(x, z, dem, spine, cfg.instanceNoiseOffset());
-            case DUNES:
-                return Landforms.dunes(x, z, s, cal);
-            case FEN:
-                return Landforms.fen(x, z, lm, s);
-            case DROWNED_SHELF:
-                return Landforms.drownedShelf(x, z, lm, s, cal);
-            case SPIRES:
-                return Landforms.spires(x, z, dem, lm, needles, cfg.instanceNoiseOffset());
-            case TERRACES:
-                return Landforms.terraces(x, z, lm, s);
-            case COAST:
-                return Landforms.coast(x, z, dem, s);
-            default:
-                return dem;
-        }
-    }
-
-    // ---------------------------------------------------------------------------------------
-    // rivers and lakes
-    // ---------------------------------------------------------------------------------------
-
-    /** {@link Fields#waterLine} of a column with no water in it. */
-    public static final double NO_WATER_LINE = -1.0E9;
-
-    // ---------------------------------------------------------------------------------------
-    // convenience
-    // ---------------------------------------------------------------------------------------
-
-    /** Final surface height (blocks) of the column. */
-    public double height(double x, double z) {
-        return sample(x, z).height();
-    }
-
-    /**
-     * Surface slope in degrees at a block, the way the offline engine measures it: the L1 norm of the
-     * height-field gradient ({@code |dh/dx| + |dh/dz|}, central differences over one block), as an angle.
-     */
-    public double slopeDegrees(double x, double z) {
-        double dx = (height(x + 1, z) - height(x - 1, z)) * 0.5;
-        double dz = (height(x, z + 1) - height(x, z - 1)) * 0.5;
-        return Math.toDegrees(Math.atan(Math.abs(dx) + Math.abs(dz)));
-    }
-
-    /** True when {@code window} contains {@code v} (small readability helper for tests and tools). */
-    public static boolean inWindow(Window window, double v) {
-        return window.contains(v);
+    /** Landmark ownership fraction for one column (kept for the tools). */
+    public int landmarkAt(double x, double z) {
+        return Regions.idAt(x, z);
     }
 }
