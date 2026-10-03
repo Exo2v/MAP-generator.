@@ -100,7 +100,7 @@ public class VantrayaChunkGenerator extends NoiseBasedChunkGenerator {
         }
         VantrayaModel model = modelOf(structureState);
         List<Structure> dropped = new ArrayList<>();
-        for (Map.Entry<Structure, StructureStart> entry : chunk.getStarts().entrySet()) {
+        for (Map.Entry<Structure, StructureStart> entry : chunk.getAllStarts().entrySet()) {
             StructureStart start = entry.getValue();
             if (start == null || !start.isValid()) {
                 continue;
