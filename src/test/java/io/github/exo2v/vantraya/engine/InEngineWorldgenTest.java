@@ -552,7 +552,7 @@ class InEngineWorldgenTest {
             }
         }
         assertTrue(problems.isEmpty(), String.join("\n", problems));
-        assertTrue("no upland river filled", filled > 0);
+        assertTrue(filled > 0, "no upland river filled");
     }
 
     // ---- the terrain on the real density-function engine -----------------------------------------------
