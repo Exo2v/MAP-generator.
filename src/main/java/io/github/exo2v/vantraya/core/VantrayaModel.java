@@ -575,10 +575,15 @@ public final class VantrayaModel {
 
     /** The water surface of a channel sits this far below the natural ground of its bed. */
     private static final double RIVER_INCISE = 2.0;
-    /** How far below the water surface the channel floors are cut. */
-    private static final double TRUNK_DEPTH = 4.0;
-    private static final double TRIB_DEPTH = 3.0;
-    private static final double LAKE_DEPTH = 3.5;
+    /**
+     * How far below the water surface the channel floors are cut. The engine reads the height field on a
+     * 4-block grid and interpolates, which shaves the top off a narrow notch: a shallow cut comes out dry on
+     * the far side of that smoothing (the second play test found channels with no water in them). The depths
+     * below leave water in every channel once the grid has had its way.
+     */
+    private static final double TRUNK_DEPTH = 6.0;
+    private static final double TRIB_DEPTH = 5.0;
+    private static final double LAKE_DEPTH = 5.0;
 
     /** {@link Fields#waterLine} of a column with no channel in it. */
     public static final double NO_WATER_LINE = -1.0E9;
@@ -618,7 +623,7 @@ public final class VantrayaModel {
         double halfTrunk = 6.0 + 9.0 * seaward;
         double s1 = ridgeFactor * low;
         double t1 = trunkDist / halfTrunk;
-        double chan1 = (1.0 - Mathx.smoothstep(0.55, 1.0, t1)) * s1;
+        double chan1 = (1.0 - Mathx.smoothstep(0.65, 1.25, t1)) * s1;
         double val1 = (1.0 - Mathx.smoothstep(1.0, 3.4, t1)) * s1;
 
         // tributaries (narrower)
@@ -626,13 +631,13 @@ public final class VantrayaModel {
         double halfTrib = 3.5 + 2.0 * seaward;
         double s2 = ridgeFactor * low * 0.85;
         double t2 = tribDist / halfTrib;
-        double chan2 = (1.0 - Mathx.smoothstep(0.55, 1.0, t2)) * s2;
+        double chan2 = (1.0 - Mathx.smoothstep(0.65, 1.25, t2)) * s2;
         double val2 = (1.0 - Mathx.smoothstep(1.0, 3.0, t2)) * s2;
 
         double out = dem;
         double valley = Math.max(val1, val2);
         double bed = chan1 >= chan2 ? trunkBed : tribBed;
-        out -= valley * Math.max(out - bed, 0.0) * 0.45; // the wide U: ground slopes towards the channel floor
+        out -= valley * Math.max(out - bed, 0.0) * 0.50; // the wide U: ground slopes towards the channel floor
         out = out * (1.0 - chan2) + Math.min(out, tribBed) * chan2;
         out = out * (1.0 - chan1) + Math.min(out, trunkBed) * chan1;
         double river = Math.max(chan1, chan2);
