@@ -156,7 +156,7 @@ public final class Spec {
             new Landmark("gilded_dunes", "The Gilded Dunes",
                     2300, 75, 0, 1600, 3100, -800, 800, 75, 94,
                     Kind.DUNES, List.of("desert", "badlands"),
-                    w(0.20, 0.45), w(0.06, 0.35), w(-0.35, 0.35), w(0.70, 1.0), w(-0.8, -0.2),
+                    w(0.20, 0.45), w(-0.20, 0.02), w(-0.45, -0.15), w(0.70, 1.0), w(-0.8, -0.2),
                     "red_sand, sandstone, terracotta (table) / black glass crests (map)"),
             new Landmark("whispering_fen", "The Whispering Fen",
                     2000, 63, 2000, 1300, 2700, 1300, 2700, 62, 66,
@@ -176,7 +176,7 @@ public final class Spec {
             new Landmark("byzantine_choir", "The Byzantine Choir",
                     1800, 120, -1800, 1300, 2300, -2300, -1300, 110, 145,
                     Kind.TERRACES, List.of("meadow", "cherry_grove"),
-                    w(0.40, 0.70), w(-0.72, -0.45), w(0.38, 0.50), w(-0.35, 0.10), w(-0.45, 0.05),
+                    w(0.40, 0.70), w(-0.72, -0.45), w(0.38, 0.50), w(-0.15, 0.15), w(-0.45, 0.05),
                     "cherry terraces, stone, gilded ruins"));
 
     /**
