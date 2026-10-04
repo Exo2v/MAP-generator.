@@ -176,7 +176,7 @@ public final class Spec {
             new Landmark("byzantine_choir", "The Byzantine Choir",
                     1800, 120, -1800, 1300, 2300, -2300, -1300, 110, 145,
                     Kind.TERRACES, List.of("meadow", "cherry_grove"),
-                    w(0.40, 0.70), w(-0.72, -0.45), w(0.10, 0.30), w(-0.35, 0.10), w(-0.45, 0.05),
+                    w(0.40, 0.70), w(-0.72, -0.45), w(0.38, 0.50), w(-0.35, 0.10), w(-0.45, 0.05),
                     "cherry terraces, stone, gilded ruins"));
 
     /**
